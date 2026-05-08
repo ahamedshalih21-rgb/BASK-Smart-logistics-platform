@@ -1,0 +1,1984 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BASK | Driver Terminal</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@400,0" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- MQTT.js — cloud bridge via HiveMQ (works from file:// and localhost) -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0A0B0D;
+      color: #fff;
+      font-size: 14px;
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+
+    .leaflet-container {
+      background: #10141a !important;
+    }
+
+    .leaflet-control-attribution {
+      background: rgba(10, 11, 13, 0.8) !important;
+      color: rgba(255, 255, 255, 0.55) !important;
+      font-size: 10px !important;
+    }
+
+    .leaflet-control-attribution a {
+      color: rgba(0, 242, 255, 0.75) !important;
+    }
+
+    .leaflet-control-zoom {
+      border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    }
+
+    .leaflet-control-zoom a {
+      background: #141820 !important;
+      color: rgba(255, 255, 255, 0.8) !important;
+      border-color: rgba(255, 255, 255, 0.1) !important;
+    }
+
+    .leaflet-control-zoom a:hover {
+      background: #1d222b !important;
+      color: #00F2FF !important;
+    }
+
+    .leaflet-popup-content-wrapper,
+    .leaflet-popup-tip {
+      background: #111417 !important;
+      color: #fff !important;
+      border: 1px solid rgba(0, 242, 255, 0.2) !important;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+    }
+
+    .leaflet-popup-content {
+      margin: 10px 14px !important;
+      font-family: 'Inter', sans-serif !important;
+      font-size: 12px !important;
+    }
+
+    .grid-overlay {
+      background-image: radial-gradient(circle, rgba(58, 73, 75, 0.08) 1px, transparent 1px);
+      background-size: 24px 24px;
+      pointer-events: none;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 242, 255, 0.3);
+    }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: rgba(0, 0, 0, 0.72);
+      backdrop-filter: blur(6px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s;
+    }
+
+    .modal-overlay.open {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .modal-box {
+      background: #141820;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      width: 520px;
+      max-width: 92vw;
+      max-height: 85vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transform: translateY(12px) scale(.98);
+      transition: transform .2s;
+    }
+
+    .modal-overlay.open .modal-box {
+      transform: translateY(0) scale(1);
+    }
+
+    .modal-hdr {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 22px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      flex-shrink: 0;
+    }
+
+    .modal-hdr-title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: .03em;
+      color: #fff;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.5);
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+      transition: color .15s;
+    }
+
+    .modal-close:hover {
+      color: #fff;
+    }
+
+    .modal-body {
+      padding: 20px 22px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .modal-ftr {
+      padding: 14px 22px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      flex-shrink: 0;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 52px;
+      right: 18px;
+      z-index: 300;
+      background: #141820;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 6px;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      transform: translateY(60px);
+      opacity: 0;
+      transition: all .3s;
+      pointer-events: none;
+      min-width: 260px;
+    }
+
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .toast.green {
+      border-color: rgba(0, 255, 171, 0.35);
+    }
+
+    .toast.green .t-icon {
+      color: #00FFAB;
+    }
+
+    .toast.cyan {
+      border-color: rgba(0, 242, 255, 0.35);
+    }
+
+    .toast.cyan .t-icon {
+      color: #00F2FF;
+    }
+
+    .toast.warn {
+      border-color: rgba(255, 215, 0, 0.35);
+    }
+
+    .toast.warn .t-icon {
+      color: #FFD700;
+    }
+
+    .toast.red {
+      border-color: rgba(255, 80, 80, 0.35);
+    }
+
+    .toast.red .t-icon {
+      color: #FF5050;
+    }
+
+    .slide-panel {
+      position: fixed;
+      top: 64px;
+      right: 0;
+      bottom: 40px;
+      width: 420px;
+      max-width: 95vw;
+      background: #0F1115;
+      border-left: 1px solid rgba(255, 255, 255, 0.12);
+      z-index: 100;
+      transform: translateX(100%);
+      transition: transform .3s ease;
+      display: flex;
+      flex-direction: column;
+      box-shadow: -8px 0 24px rgba(0, 0, 0, 0.5);
+    }
+
+    .slide-panel.open {
+      transform: translateX(0);
+    }
+
+    .slide-panel-hdr {
+      padding: 18px 22px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+      background: #0F1115;
+    }
+
+    .slide-panel-hdr-title {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: .02em;
+    }
+
+    .slide-panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .stop-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 11px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      cursor: pointer;
+      transition: background .15s;
+    }
+
+    .stop-item:hover {
+      background: rgba(255, 255, 255, 0.03);
+      margin: 0 -10px;
+      padding: 11px 10px;
+      border-radius: 4px;
+    }
+
+    .stop-item:last-child {
+      border-bottom: none;
+    }
+
+    .stat-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 6px;
+      padding: 14px;
+    }
+
+    .truck-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 6px;
+      padding: 13px 15px;
+      cursor: pointer;
+      transition: border-color .15s;
+    }
+
+    .truck-card:hover {
+      border-color: rgba(0, 242, 255, 0.35);
+    }
+
+    .truck-card.active {
+      border-color: rgba(0, 242, 255, 0.5);
+      background: rgba(0, 242, 255, 0.04);
+    }
+
+    .dest-row {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .dest-row-hdr {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: #00F2FF;
+      margin-bottom: 4px;
+    }
+
+    .dest-row-remove {
+      background: rgba(255, 80, 80, 0.1);
+      border: 1px solid rgba(255, 80, 80, 0.2);
+      color: #FF5050;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-weight: 600;
+    }
+
+    .dest-row-remove:hover {
+      background: rgba(255, 80, 80, 0.25);
+    }
+
+    .warehouse-row {
+      background: rgba(0, 242, 255, 0.04);
+      border: 1px solid rgba(0, 242, 255, 0.2);
+      border-radius: 8px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .warehouse-row-hdr {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #00F2FF;
+      letter-spacing: .05em;
+    }
+
+    .eta-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: rgba(0, 242, 255, 0.12);
+      border: 1px solid rgba(0, 242, 255, 0.25);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #00F2FF;
+      font-family: monospace;
+      margin-left: 6px;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: .5;
+        transform: scale(.85);
+      }
+    }
+
+    .pulse {
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes nodePop {
+      0% {
+        transform: scale(0);
+        opacity: 0;
+      }
+
+      60% {
+        transform: scale(1.4);
+        opacity: 1;
+      }
+
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    .node-pop {
+      animation: nodePop 0.45s cubic-bezier(.34, 1.56, .64, 1) forwards;
+    }
+
+    .inp {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 5px;
+      padding: 10px 13px;
+      color: #fff;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      width: 100%;
+      outline: none;
+      transition: border-color .15s, background .15s;
+    }
+
+    .inp:focus {
+      border-color: rgba(0, 242, 255, 0.5);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .inp::placeholder {
+      color: rgba(255, 255, 255, 0.35);
+    }
+
+    .inp[readonly] {
+      background: rgba(0, 242, 255, 0.06);
+      color: rgba(0, 242, 255, 0.85);
+      cursor: default;
+    }
+
+    select.inp option {
+      background-color: #141820;
+      color: #ffffff;
+    }
+
+    label {
+      display: block;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.6);
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    .vtype-selector {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .vtype-btn {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      padding: 8px 4px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .vtype-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .vtype-btn.active {
+      border-color: #00F2FF;
+      background: rgba(0, 242, 255, 0.1);
+    }
+
+    .btn-cyan {
+      background: #00F2FF;
+      color: #001b20;
+      border: none;
+      border-radius: 4px;
+      padding: 11px 18px;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn-cyan:hover {
+      background: #33F5FF;
+      box-shadow: 0 0 20px rgba(0, 242, 255, 0.35);
+    }
+
+    .btn-cyan:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-ghost {
+      background: none;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+      padding: 11px 18px;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      color: rgba(255, 255, 255, 0.8);
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn-ghost:hover {
+      border-color: rgba(0, 242, 255, 0.4);
+      color: #00F2FF;
+    }
+
+    .mode-toggle {
+      display: flex;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 6px;
+      padding: 3px;
+      gap: 3px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 6px 10px;
+      border: none;
+      border-radius: 4px;
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all .15s;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .mode-btn.active {
+      background: rgba(0, 242, 255, 0.18);
+      color: #00F2FF;
+      border: 1px solid rgba(0, 242, 255, 0.4);
+    }
+
+    .btn-red {
+      background: none;
+      border: 1px solid rgba(255, 80, 80, 0.25);
+      border-radius: 4px;
+      padding: 11px 18px;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      color: #FF5050;
+      transition: all .15s;
+    }
+
+    .btn-red:hover {
+      background: rgba(255, 80, 80, 0.1);
+    }
+
+    .ms {
+      font-family: 'Material Symbols Outlined';
+      font-style: normal;
+      font-weight: normal;
+      line-height: 1;
+      display: inline-block;
+      vertical-align: middle;
+    }
+
+    .left-sidebar {
+      position: fixed;
+      left: 0;
+      top: 64px;
+      bottom: 40px;
+      width: 272px;
+      background: #0F1115;
+      border-right: 1px solid rgba(255, 255, 255, 0.12);
+      z-index: 40;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: transform .3s cubic-bezier(.4, 0, .2, 1), width .3s cubic-bezier(.4, 0, .2, 1), opacity .3s;
+    }
+
+    .left-sidebar.collapsed {
+      transform: translateX(-272px);
+    }
+
+    .left-sidebar-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 22px 20px 16px;
+    }
+
+    .left-sidebar-footer {
+      padding: 14px 20px 18px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex-shrink: 0;
+      background: #0F1115;
+    }
+
+    #sidebar-toggle-tab {
+      position: fixed;
+      left: 272px;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 45;
+      width: 18px;
+      height: 52px;
+      background: #0F1115;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-left: none;
+      border-radius: 0 6px 6px 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: left .3s cubic-bezier(.4, 0, .2, 1), background .15s;
+      box-shadow: 3px 0 10px rgba(0, 0, 0, 0.4);
+    }
+
+    #sidebar-toggle-tab:hover {
+      background: #1d222b;
+    }
+
+    #sidebar-toggle-tab.collapsed {
+      left: 0;
+    }
+
+    #sidebar-toggle-tab .stab-icon {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.55);
+      transition: transform .3s, color .15s;
+    }
+
+    #sidebar-toggle-tab:hover .stab-icon {
+      color: #00F2FF;
+    }
+
+    #sidebar-toggle-tab.collapsed .stab-icon {
+      transform: rotate(180deg);
+    }
+
+    main {
+      transition: opacity .3s;
+    }
+
+    main.sidebar-collapsed {
+      margin-left: 0 !important;
+    }
+
+    .panel-minimize-btn {
+      background: none;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+      flex-shrink: 0;
+    }
+
+    .panel-minimize-btn:hover {
+      background: rgba(0, 242, 255, 0.08);
+      border-color: rgba(0, 242, 255, 0.35);
+    }
+
+    .panel-minimize-btn .ms {
+      font-size: 15px;
+      color: rgba(255, 255, 255, 0.5);
+      transition: color .15s;
+    }
+
+    .panel-minimize-btn:hover .ms {
+      color: #00F2FF;
+    }
+
+    /* [AI NOTE: Adjusted top positioning to 80px (top-20) to clear the main header cleanly] */
+    .panel-stub {
+      position: absolute;
+      top: 80px;
+      left: 24px;
+      z-index: 21;
+      background: rgba(18, 20, 24, 0.92);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      padding: 8px 14px;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+      transition: background .15s;
+    }
+
+    .panel-stub:hover {
+      background: rgba(18, 20, 24, 1);
+      border-color: rgba(0, 242, 255, 0.3);
+    }
+
+    .panel-stub-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      color: rgba(255, 255, 255, 0.8);
+      text-transform: uppercase;
+    }
+
+    .panel-stub-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #00FFAB;
+      flex-shrink: 0;
+    }
+
+    .map-panel {
+      background: rgba(18, 20, 24, 0.92);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      max-height: calc(100vh - 120px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .map-panel-body {
+      padding: 22px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .loader {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(0, 0, 0, 0.25);
+      border-top-color: #001b20;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* [AI NOTE: This class was added to handle "Dynamic Focus" – fading out background panels when a modal is open to reduce UI clutter] */
+    .fade-out-focus {
+      opacity: 0.2;
+      pointer-events: none;
+      filter: blur(2px);
+    }
+  </style>
+</head>
+
+<body>
+
+  <header
+    class="fixed top-0 left-0 right-0 h-16 flex justify-between items-center px-6 bg-[#0A0B0D] border-b border-white/12 z-50">
+    <div class="flex items-center gap-4">
+      <span class="text-[17px] font-semibold tracking-wide">BASK <span class="text-white/40 mx-1">|</span> Driver
+        Terminal</span>
+      <div class="relative" id="main-nav-menu">
+        <button
+          class="text-white/60 hover:text-white transition-colors flex items-center justify-center p-1 rounded-full hover:bg-white/5"
+          onclick="toggleMainMenu()" title="Menu">
+          <span class="ms" style="font-size:22px">more_vert</span>
+        </button>
+        <div id="main-menu-dropdown"
+          class="absolute top-full left-0 mt-3 w-48 bg-[#141820] border border-white/10 rounded-lg shadow-2xl py-2 z-[100]"
+          style="display:none;flex-direction:column;">
+          <button
+            class="text-left px-4 py-2.5 text-sm text-[#00F2FF] hover:bg-white/5 transition-colors menu-tab font-medium"
+            onclick="switchTab('terminal',this)">Terminal</button>
+          <button
+            class="text-left px-4 py-2.5 text-sm text-white/70 hover:bg-white/5 hover:text-white transition-colors menu-tab font-medium"
+            onclick="switchTab('fleet',this)">Fleet Management</button>
+          <button
+            class="text-left px-4 py-2.5 text-sm text-white/70 hover:bg-white/5 hover:text-white transition-colors menu-tab font-medium"
+            onclick="switchTab('inventory',this)">Inventory</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIM / LIVE MODE TOGGLE -->
+    <div class="flex items-center gap-1 bg-white/5 border border-white/12 rounded-full p-1" id="driver-mode-pill">
+      <button id="mode-btn-sim" onclick="setDriverMode('sim')" class="px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase transition-all bg-[#00F2FF]/20 text-[#00F2FF] border border-[#00F2FF]/40">SIM</button>
+      <button id="mode-btn-live" onclick="setDriverMode('live')" class="px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase transition-all text-white/40 border border-transparent">LIVE</button>
+    </div>
+
+    <div class="flex items-center gap-5">
+      <button class="btn-ghost flex items-center gap-2 relative border-none hover:bg-white/5" style="padding: 6px 12px;"
+        onclick="openModal('alert-modal')" title="System Alerts">
+        <span class="ms text-white/80" style="font-size:22px">notifications</span>
+        <span id="alert-badge"
+          class="absolute top-0 right-1 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow"
+          style="display:none;">0</span>
+      </button>
+      <span class="text-white/55 text-xs font-mono">SYS Time <span id="cur-time"
+          class="text-[#00F2FF] font-semibold ml-1">--:--</span></span>
+    </div>
+  </header>
+
+  <aside class="left-sidebar" id="left-sidebar">
+    <div class="left-sidebar-body">
+      <div class="flex items-center justify-between mb-5">
+        <div class="text-[#00F2FF] text-[11px] font-bold tracking-[0.2em] uppercase">Base Station</div>
+        <button class="panel-minimize-btn" onclick="toggleSidebar()" title="Collapse sidebar">
+          <span class="ms">chevron_left</span>
+        </button>
+      </div>
+
+      <div class="stat-card mb-4 border-[#00F2FF]/30 bg-[#00F2FF]/5">
+        <div class="flex justify-between items-center mb-3">
+          <span class="text-[10px] uppercase text-white/60 tracking-widest font-semibold">Live Telemetry</span>
+          <span class="pulse inline-block w-2 h-2 rounded-full bg-[#00FFAB]"></span>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <div class="text-[10px] text-white/50 mb-1 uppercase font-bold tracking-wider">Speed</div>
+            <div class="text-xl font-mono text-[#00F2FF]" id="telemetry-speed">-- km/h</div>
+          </div>
+          <div>
+            <div class="text-[10px] text-white/50 mb-1 uppercase font-bold tracking-wider">Remaining</div>
+            <div class="text-xl font-mono text-white/90" id="telemetry-dist">-- km</div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        onclick="const hc = document.getElementById('hardware-logs-container'); const ico = document.getElementById('hw-logs-chevron'); if(hc.style.display==='none'){hc.style.display='flex'; ico.style.transform='rotate(180deg)';}else{hc.style.display='none'; ico.style.transform='rotate(0deg)';}"
+        style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px; margin-top: 10px; transition: color 0.2s;"
+        class="hover:text-[#00F2FF]">
+        <span style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em;"
+          class="text-white/60">Hardware Logs</span>
+        <span class="material-symbols-outlined text-white/60 transition-transform duration-200"
+          id="hw-logs-chevron">keyboard_arrow_down</span>
+      </div>
+
+      <div id="hardware-logs-container" style="display: none; flex-direction: column; gap: 12px; margin-top: 12px;">
+        <div class="stat-card" id="weather-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div class="text-[10px] uppercase text-white/55 tracking-widest font-semibold">Weather (DHT22)</div>
+            <span id="s-weather-icon" style="font-size:20px">🌤</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <div>
+              <div style="font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:2px">Temp</div>
+              <div class="text-xl font-mono" id="s-temp" style="color:#FFD700">28.4°C</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:2px">Humidity</div>
+              <div class="text-xl font-mono" id="s-hum" style="color:#00F2FF">64%</div>
+            </div>
+          </div>
+          <div class="text-[11px] mt-2" id="s-weather-status" style="color:rgba(0,255,171,0.8)">Clear · Cargo safe</div>
+        </div>
+
+        <div class="stat-card" id="traffic-card">
+          <div class="text-[10px] uppercase text-white/55 mb-2 tracking-widest font-semibold">Traffic</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <div class="text-xl font-mono" id="s-traffic-mult" style="color:#FFD700">1.35×</div>
+            <div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden">
+              <div id="s-traffic-bar"
+                style="height:100%;width:40%;background:#FFD700;border-radius:3px;transition:width 0.6s,background 0.6s">
+              </div>
+            </div>
+          </div>
+          <div class="text-[11px]" id="s-traffic-label" style="color:#FFD700">Peak daytime</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="text-[10px] uppercase text-white/55 mb-2 tracking-widest font-semibold">GPS (AT6668)</div>
+          <div class="text-[13px] font-mono text-[#00FFAB]" id="s-gps">11.0168, 76.9558</div>
+          <div class="text-[11px] text-white/60 mt-1">Lock · ±2.3m accuracy</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="left-sidebar-footer">
+      <button class="btn-cyan w-full" onclick="syncFleet()"><span class="ms" style="font-size:15px">sync</span> Sync
+        Edge Nodes</button>
+      <button class="btn-ghost w-full" onclick="openPanel('route-panel')"><span class="ms"
+          style="font-size:15px">route</span> Plan Route</button>
+    </div>
+  </aside>
+
+  <div id="sidebar-toggle-tab" onclick="toggleSidebar()" title="Toggle sidebar">
+    <span class="ms stab-icon">chevron_left</span>
+  </div>
+
+  <main id="main-map-area" class="ml-[272px] pt-16 pb-10 h-screen relative overflow-hidden transition-all duration-300">
+    <div id="warehouse-map" class="absolute inset-0 z-0"></div>
+    <div class="absolute inset-0 grid-overlay z-10 pointer-events-none"></div>
+
+    <div class="panel-stub" id="terminal-stub" onclick="restoreTerminalPanel()" title="Expand Control Panel">
+      <span class="panel-stub-dot pulse"></span>
+      <span class="panel-stub-label">Control Panel</span>
+      <span class="ms" style="font-size:14px;color:rgba(0,242,255,0.7)">open_in_full</span>
+    </div>
+
+    <div id="panel-terminal" class="map-panel absolute top-20 left-6 w-[340px] z-20">
+      <div class="map-panel-body">
+        <div class="flex justify-between mb-6">
+          <div>
+            <div class="text-[10px] uppercase tracking-widest text-white/55 mb-2 font-semibold">Terminal Schedule</div>
+            <div class="text-base font-semibold">Warehouse Alpha</div>
+            <div class="text-3xl text-[#00F2FF] font-light font-mono mt-1" id="active-count">00</div>
+            <div class="text-[11px] text-white/55 mt-1">active deliveries</div>
+          </div>
+          <div class="text-right flex flex-col items-end gap-1">
+            <button class="panel-minimize-btn" onclick="minimizeTerminalPanel()" title="Minimize panel">
+              <span class="ms">remove</span>
+            </button>
+            <div class="text-[10px] uppercase tracking-widest text-white/55 mt-1 font-semibold">Status</div>
+            <div
+              class="text-[#00FFAB] text-xs font-bold tracking-widest uppercase flex items-center gap-1.5 justify-end">
+              <span class="pulse inline-block w-1.5 h-1.5 rounded-full bg-[#00FFAB]"></span> Live
+            </div>
+          </div>
+        </div>
+        <div id="stop-list" class="text-[13px]"></div>
+        <div class="mt-5 pt-4 border-t border-white/10 flex gap-2">
+          <button class="btn-cyan flex-1 text-[11px] py-2.5" onclick="openPanel('route-panel')"><span class="ms"
+              style="font-size:14px">add_location</span> Add Stop</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="panel-fleet" class="map-panel absolute top-20 left-6 w-[380px] z-20" style="display:none">
+      <div class="map-panel-body">
+        <div class="flex justify-between items-center mb-5">
+          <div class="text-base font-semibold">Fleet Overview</div>
+          <button class="btn-cyan text-[11px] py-2 px-3" onclick="openModal('assign-modal')"><span class="ms"
+              style="font-size:13px">add</span> Assign</button>
+        </div>
+        <div class="space-y-3" id="fleet-list"></div>
+      </div>
+    </div>
+
+    <div id="panel-inventory" class="map-panel absolute top-20 left-6 w-[340px] z-20" style="display:none">
+      <div class="map-panel-body">
+        <div class="flex justify-between items-center mb-5">
+          <div class="text-base font-semibold">Inventory</div>
+          <button class="btn-cyan text-[11px] py-2 px-3" onclick="openModal('add-item-modal')"><span class="ms"
+              style="font-size:13px">add</span> Add Item</button>
+        </div>
+        <div class="space-y-2" id="inv-list"></div>
+      </div>
+    </div>
+
+    <div
+      class="absolute bottom-8 right-6 bg-[#141820]/95 p-5 border border-white/12 flex flex-col gap-3 z-20 rounded-lg min-w-[240px] shadow-2xl">
+      <div class="flex items-center gap-5">
+        <div
+          class="w-12 h-12 rounded-full border border-[#00F2FF]/40 bg-[#00F2FF]/10 flex items-center justify-center flex-shrink-0">
+          <span class="ms text-[#00F2FF]" style="font-size:24px">route</span>
+        </div>
+        <div>
+          <div class="text-[10px] uppercase tracking-widest text-white/60 mb-1 font-semibold">Next Stop ETA</div>
+          <div class="text-3xl font-light font-mono"><span id="next-eta">--</span> <span
+              class="text-sm text-[#00F2FF]">MIN</span></div>
+          <div class="text-[11px] text-[#00FFAB] mt-1 font-semibold" id="next-stop-name">—</div>
+        </div>
+      </div>
+      <div id="final-stop-indicator" style="display:none;border-top:1px solid rgba(255,255,255,0.08);padding-top:10px">
+        <div class="text-[10px] uppercase tracking-widest text-white/45 mb-1 font-semibold">Final Destination</div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="text-[11px] text-white/70 truncate w-24" id="final-stop-name" style="font-style:italic">—</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="font-mono text-[12px]" id="final-stop-dist" style="color:#FFD700">-- km</span>
+            <span class="font-mono text-[12px] font-semibold" id="final-stop-eta" style="color:#FFA500">-- min</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- SIM PLAYBACK CONTROLS — shown after route is planned in SIM mode -->
+    <div id="sim-controls" class="absolute bottom-14 left-1/2 z-30 bg-[#141820]/95 border border-[#00F2FF]/25 flex items-center gap-3 px-5 py-3 rounded-lg shadow-2xl" style="display:none; transform:translateX(-50%)">
+      <span class="text-[10px] uppercase tracking-widest text-[#00F2FF] font-bold flex items-center gap-1.5"><span class="pulse inline-block w-1.5 h-1.5 rounded-full bg-[#00F2FF]"></span>Sim</span>
+      <div class="h-4 w-px bg-white/15"></div>
+      <button id="sim-play-btn" onclick="simPlay()" class="flex items-center gap-1.5 bg-[#00FFAB]/15 border border-[#00FFAB]/35 text-[#00FFAB] text-[11px] font-bold px-3 py-1.5 rounded-md uppercase tracking-wider hover:bg-[#00FFAB]/25 transition-colors">
+        <span class="ms" style="font-size:14px">play_arrow</span>Play
+      </button>
+      <button id="sim-pause-btn" onclick="simPause()" class="flex items-center gap-1.5 bg-[#FFD700]/15 border border-[#FFD700]/35 text-[#FFD700] text-[11px] font-bold px-3 py-1.5 rounded-md uppercase tracking-wider hover:bg-[#FFD700]/25 transition-colors" style="display:none">
+        <span class="ms" style="font-size:14px">pause</span>Pause
+      </button>
+      <button onclick="simReset()" class="flex items-center gap-1.5 bg-white/5 border border-white/15 text-white/55 text-[11px] font-bold px-3 py-1.5 rounded-md uppercase tracking-wider hover:bg-white/10 transition-colors">
+        <span class="ms" style="font-size:14px">replay</span>Reset
+      </button>
+      <div class="h-4 w-px bg-white/15"></div>
+      <button id="sim-speed-btn" onclick="cycleSimSpeed()" title="Click to change speed" class="bg-[#00F2FF]/10 border border-[#00F2FF]/25 text-[#00F2FF] text-[11px] font-bold px-3 py-1.5 rounded-md tracking-wider hover:bg-[#00F2FF]/20 transition-colors">1×</button>
+    </div>
+
+    <div id="reroute-banner"
+      class="absolute top-20 left-1/2 -translate-x-1/2 z-30 bg-[#141820]/95 border border-yellow-500/40 flex items-center gap-3 px-6 py-3 rounded shadow-xl cursor-pointer"
+      onclick="dismissBanner()" style="display:none">
+      <span class="ms text-yellow-400" style="font-size:18px">warning</span>
+      <span id="banner-text" class="text-yellow-300 text-[13px] tracking-wide">Traffic detected — A* rerouting in
+        progress</span>
+      <span class="ms text-white/40 text-sm ml-3">close</span>
+    </div>
+
+  </main>
+
+  <footer
+    class="fixed bottom-0 left-0 right-0 h-10 flex justify-between items-center px-6 bg-[#0A0B0D] border-t border-white/12 z-50">
+    <div class="flex items-center gap-6">
+      <div class="text-[11px] font-bold tracking-widest text-[#00FFAB] uppercase flex items-center gap-2">
+        <span class="pulse inline-block w-1.5 h-1.5 rounded-full bg-[#00FFAB]"></span> Edge Computing Active
+      </div>
+      <div class="text-[11px] text-white/55 font-mono uppercase tracking-widest" id="sys-status">System: Nominal</div>
+    </div>
+  </footer>
+
+  <div class="slide-panel" id="route-panel">
+    <div class="slide-panel-hdr">
+      <span class="slide-panel-hdr-title">
+        Route Planner
+        <span
+          style="font-size:9px;color:#00FFAB;font-weight:700;letter-spacing:.15em;vertical-align:middle;margin-left:8px;background:rgba(0,255,171,0.12);border:1px solid rgba(0,255,171,0.3);padding:2px 6px;border-radius:3px">A*
+          ALGO</span>
+      </span>
+      <button class="modal-close" onclick="closePanel('route-panel')"><span class="ms">close</span></button>
+    </div>
+    <div class="slide-panel-body">
+      <div style="margin-bottom:2px">
+        <label style="margin-bottom:6px">Input Mode</label>
+        <div class="mode-toggle" id="mode-toggle">
+          <button class="mode-btn active" id="mode-city" onclick="setInputMode('city')">
+            <span class="ms" style="font-size:13px;vertical-align:middle">location_city</span> City / Pincode
+          </button>
+          <button class="mode-btn" id="mode-coords" onclick="setInputMode('coords')">
+            <span class="ms" style="font-size:13px;vertical-align:middle">my_location</span> Lat / Lng
+          </button>
+        </div>
+      </div>
+
+      <div class="warehouse-row">
+        <div class="warehouse-row-hdr">
+          <span class="ms" style="font-size:18px">warehouse</span> Warehouse (Origin)
+        </div>
+        <div id="wh-city-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><label>Place Name</label><input class="inp" id="wh-place" placeholder="e.g. Gandhipuram"
+              value="Gandhipuram" /></div>
+          <div><label>Pincode (6 digits)</label><input class="inp" id="wh-pincode" placeholder="641012" maxlength="6"
+              inputmode="numeric" value="641012" /></div>
+        </div>
+        <div id="wh-coords-fields" style="display:none;flex-direction:column;gap:8px">
+          <div><label>Latitude, Longitude</label><input class="inp" id="wh-latlng" placeholder="11.01743, 76.95370"
+              value="11.01743, 76.95370" oninput="previewLLField(this,'wh-ll-preview')" style="font-family:monospace" />
+            <div id="wh-ll-preview"
+              style="font-size:10px;margin-top:4px;color:rgba(0,242,255,0.7);font-family:monospace;min-height:14px">✓
+              11.01743 / 76.95370</div>
+          </div>
+          <div><label>Warehouse Name</label><input class="inp" id="wh-name" placeholder="e.g. Gandhipuram Warehouse"
+              value="Gandhipuram Warehouse" /></div>
+        </div>
+        <div class="mt-3"><label>Vehicle Type</label>
+          <div class="vtype-selector" id="vtype-wh">
+            <button class="vtype-btn" data-vtype="scooty" onclick="selectVType('wh','scooty')" title="Scooty"><span style="font-size:18px">🛵</span><span style="font-size:9px;color:rgba(255,255,255,0.65);margin-top:2px">Scooty</span></button>
+            <button class="vtype-btn" data-vtype="car" onclick="selectVType('wh','car')" title="Car"><span style="font-size:18px">🚗</span><span style="font-size:9px;color:rgba(255,255,255,0.65);margin-top:2px">Car</span></button>
+            <button class="vtype-btn active" data-vtype="van" onclick="selectVType('wh','van')" title="Van"><span style="font-size:18px">🚐</span><span style="font-size:9px;color:rgba(255,255,255,0.65);margin-top:2px">Van</span></button>
+            <button class="vtype-btn" data-vtype="truck" onclick="selectVType('wh','truck')" title="Truck"><span style="font-size:18px">🚛</span><span style="font-size:9px;color:rgba(255,255,255,0.65);margin-top:2px">Truck</span></button>
+            <button class="vtype-btn" data-vtype="lorry" onclick="selectVType('wh','lorry')" title="Lorry"><span style="font-size:18px">🚚</span><span style="font-size:9px;color:rgba(255,255,255,0.65);margin-top:2px">Lorry</span></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-between items-center mt-1">
+        <label style="margin-bottom:0">Destinations</label>
+        <button class="btn-ghost" style="padding:7px 12px;font-size:11px" onclick="addDestRow()"><span class="ms"
+            style="font-size:14px">add</span> Add</button>
+      </div>
+
+      <div id="dest-list" class="flex flex-col gap-3"></div>
+
+      <button class="btn-cyan w-full mt-2" id="run-opt-btn" onclick="runOptimize()">
+        <span class="ms" style="font-size:15px">auto_fix_high</span> Run Optimization
+      </button>
+
+      <div id="route-result"
+        style="display:none;background:rgba(0,242,255,0.06);border:1px solid rgba(0,242,255,0.25);border-radius:8px;padding:16px">
+        <div
+          style="font-size:10px;text-transform:uppercase;letter-spacing:.15em;color:rgba(255,255,255,0.55);margin-bottom:10px;font-weight:600">
+          Optimized Result</div>
+        <div id="route-result-text" style="font-size:12px;font-family:'Inter',sans-serif;color:#E9FDFB;line-height:1.8">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="alert-modal">
+    <div class="modal-box">
+      <div class="modal-hdr"><span class="modal-hdr-title">System Alerts</span><button class="modal-close"
+          onclick="closeModal('alert-modal')"><span class="ms">close</span></button></div>
+      <div class="modal-body">
+        <div id="alerts-list"></div>
+      </div>
+      <div class="modal-ftr"><button class="btn-ghost" onclick="clearAlerts()">Clear All</button><button
+          class="btn-cyan" onclick="closeModal('alert-modal')">Close</button></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // ════════════════════════════ MAP ════════════════
+    // [AI NOTE: Removed the static/default Warehouse marker instantiation so the map starts clean before planning]
+    const map = L.map('warehouse-map', { zoomControl: true, attributionControl: true }).setView([11.0168, 76.9558], 13);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19, subdomains: 'abcd', attribution: '&copy; OpenStreetMap &copy; CARTO'
+    }).addTo(map);
+
+    const routeLayer = L.layerGroup().addTo(map);
+    const stopLayer = L.layerGroup().addTo(map);
+    let warehouseMarker = null;
+
+    // [AI NOTE: Added Follow Mode logic. If a user manually pans the map, this dragstart event listener detects it and turns Follow Mode off, preventing it from violently snapping back to the vehicle]
+    let isFollowing = false;
+    map.on('dragstart', () => { isFollowing = false; });
+
+    const VEHICLE_TYPES = {
+      scooty: { icon: '🛵', label: 'Scooty', msIcon: 'electric_moped' },
+      car: { icon: '🚗', label: 'Car', msIcon: 'directions_car' },
+      van: { icon: '🚐', label: 'Van', msIcon: 'airport_shuttle' },
+      truck: { icon: '🚛', label: 'Truck', msIcon: 'local_shipping' },
+      // [AI NOTE: Differentiated lorry from truck visually by using 'rv_hookup' instead of 'local_shipping']
+      lorry: { icon: '🚚', label: 'Lorry', msIcon: 'rv_hookup' },
+    };
+
+    // ════════════════════════════ MAIN MENU & TABS ════════════════════════════
+    let mainMenuOpen = false;
+    function toggleMainMenu() {
+      mainMenuOpen = !mainMenuOpen;
+      document.getElementById('main-menu-dropdown').style.display = mainMenuOpen ? 'flex' : 'none';
+    }
+    document.addEventListener('click', e => {
+      const m = document.getElementById('main-nav-menu');
+      if (m && !m.contains(e.target)) { mainMenuOpen = false; document.getElementById('main-menu-dropdown').style.display = 'none'; }
+    });
+
+    function switchTab(tab, el) {
+      document.querySelectorAll('.menu-tab').forEach(t => { t.classList.remove('text-[#00F2FF]'); t.classList.add('text-white/70'); });
+      el.classList.remove('text-white/70'); el.classList.add('text-[#00F2FF]');
+      if (tab === 'terminal') restoreTerminalPanel(); else minimizeTerminalPanel();
+      document.getElementById('panel-fleet').style.display = tab === 'fleet' ? 'flex' : 'none';
+      document.getElementById('panel-inventory').style.display = tab === 'inventory' ? 'flex' : 'none';
+      mainMenuOpen = false; document.getElementById('main-menu-dropdown').style.display = 'none';
+    }
+
+    function openModal(id) {
+      document.getElementById(id).classList.add('open');
+      if (id === 'alert-modal') {
+        // [AI NOTE: Added fade-out-focus to trigger 'Dynamic Focus'. This fades out background elements so the UI is uncluttered when reviewing an alert.]
+        document.getElementById('main-map-area').classList.add('fade-out-focus');
+        document.getElementById('left-sidebar').classList.add('fade-out-focus');
+      }
+    }
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('open');
+      if (id === 'alert-modal') {
+        document.getElementById('main-map-area').classList.remove('fade-out-focus');
+        document.getElementById('left-sidebar').classList.remove('fade-out-focus');
+      }
+    }
+    document.querySelectorAll('.modal-overlay').forEach(o => { o.addEventListener('click', e => { if (e.target === o) closeModal(o.id); }); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.querySelectorAll('.modal-overlay.open').forEach(m => closeModal(m.id)); document.querySelectorAll('.slide-panel.open').forEach(p => closePanel(p.id)); } });
+    function openPanel(id) { document.getElementById(id).classList.add('open'); }
+    function closePanel(id) { document.getElementById(id).classList.remove('open'); }
+
+    // ════════════════════════════ DATA RENDERING ════════════════════════════
+    // [AI NOTE: Removed the static/hardcoded stops. Now initializes as an empty array so the Terminal schedule doesn't display fake data on load]
+    const stops = [];
+
+    const fleet = [
+      { id: 'TRK-001', type: 'truck', driver: 'Ramesh Kumar', status: 'active', route: 'Route A', battery: '84%' },
+      { id: 'VAN-004', type: 'van', driver: 'Suresh D', status: 'idle', route: '--', battery: '92%' },
+      { id: 'SCT-012', type: 'scooty', driver: 'Karthik', status: 'charging', route: '--', battery: '21%' }
+    ];
+
+    const inventory = [
+      { id: 'PKG-1092', desc: 'Medical Supplies', dest: 'PSG Hospital', weight: '150kg', status: 'loaded' },
+      { id: 'PKG-1093', desc: 'Electronics', dest: 'Race Course', weight: '20kg', status: 'pending' }
+    ];
+
+    const alertsList = [
+      { type: 'warn', icon: 'warning', msg: 'Cargo temp approaching limit: 29.1°C (DHT22)', time: '14:12' },
+      { type: 'cyan', icon: 'route', msg: 'A* reroute completed — saved 4.2 km on Route A', time: '13:58' },
+    ];
+
+    function renderStops() {
+      const el = document.getElementById('stop-list');
+      if (stops.length === 0) {
+        // [AI NOTE: Render an empty state message if no routes have been optimized yet]
+        el.innerHTML = '<div style="text-align:center;padding:16px;color:rgba(255,255,255,0.4);font-size:12px">No active route planned.</div>';
+        document.getElementById('active-count').textContent = '00';
+        return;
+      }
+      el.innerHTML = stops.map(s => {
+        const col = s.status === 'completed' ? '#00FFAB' : s.status === 'in-progress' ? '#00F2FF' : 'rgba(255,255,255,0.5)';
+        const lbl = s.status === 'completed' ? 'Completed' : s.status === 'in-progress' ? 'In Progress' : 'Pending';
+        const etaB = s.eta && s.eta !== '--:--' ? `<span class="eta-badge">🕐 ${s.eta}</span>` : '';
+        return `<div class="stop-item">
+      <div>
+        <div style="font-size:13px;font-weight:500;color:${s.status === 'in-progress' ? '#00F2FF' : 'rgba(255,255,255,0.92)'}">${s.name}${etaB}</div>
+        <div style="font-size:10.5px;color:rgba(255,255,255,0.5);margin-top:3px;font-family:monospace">${s.weight}kg · ${s.truck}</div>
+      </div>
+      <span style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:${col};font-weight:700">${lbl}</span>
+    </div>`;
+      }).join('');
+      document.getElementById('active-count').textContent = String(stops.filter(s => s.status !== 'completed').length).padStart(2, '0');
+    }
+
+    function renderFleet() {
+      const el = document.getElementById('fleet-list');
+      if (!el) return;
+      el.innerHTML = fleet.map(f => {
+        const statCol = f.status === 'active' ? '#00FFAB' : f.status === 'idle' ? '#FFD700' : '#FF5050';
+        return `<div class="stat-card" style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:600;font-size:13px">${f.id} <span style="font-size:10px;color:rgba(255,255,255,0.5);margin-left:6px">${f.type.toUpperCase()}</span></div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:2px">${f.driver}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10px;font-weight:700;color:${statCol};text-transform:uppercase;letter-spacing:.05em">${f.status}</div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:2px">Bat: ${f.battery}</div>
+      </div>
+    </div>`;
+      }).join('');
+    }
+
+    function renderInventory() {
+      const el = document.getElementById('inv-list');
+      if (!el) return;
+      el.innerHTML = inventory.map(i => {
+        const statCol = i.status === 'loaded' ? '#00F2FF' : 'rgba(255,255,255,0.5)';
+        return `<div class="stat-card" style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:600;font-size:13px">${i.id}</div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:2px">${i.desc}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10px;font-weight:700;color:${statCol};text-transform:uppercase">${i.status}</div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:2px">${i.dest}</div>
+      </div>
+    </div>`;
+      }).join('');
+    }
+
+    function renderAlerts() {
+      const el = document.getElementById('alerts-list');
+      el.innerHTML = alertsList.length === 0
+        ? '<div style="text-align:center;padding:24px;color:rgba(255,255,255,0.4);font-size:13px">No active alerts</div>'
+        : alertsList.map(a => `
+      <div style="display:flex;align-items:flex-start;gap:12px;padding:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:6px;margin-bottom:8px">
+        <span class="ms" style="font-size:20px;color:${a.type === 'warn' ? '#FFD700' : a.type === 'cyan' ? '#00F2FF' : '#00FFAB'}">${a.icon}</span>
+        <div style="flex:1"><div style="font-size:12.5px;color:rgba(255,255,255,0.92);line-height:1.45">${a.msg}</div><div style="font-size:10.5px;color:rgba(255,255,255,0.5);margin-top:5px;font-family:monospace">${a.time} today</div></div>
+      </div>`).join('');
+      const badge = document.getElementById('alert-badge');
+      badge.textContent = alertsList.length;
+      badge.style.display = alertsList.length === 0 ? 'none' : '';
+    }
+    function clearAlerts() { alertsList.length = 0; renderAlerts(); showToast('All alerts cleared', 'green'); }
+    function dismissBanner() { document.getElementById('reroute-banner').style.display = 'none'; }
+
+    // ════════════════════════════ CLOCK & TOASTS ════════════════════════════
+    function updateClock() {
+      const now = new Date();
+      const el = document.getElementById('cur-time');
+      if (el) el.textContent = [now.getHours(), now.getMinutes(), now.getSeconds()].map(v => String(v).padStart(2, '0')).join(':');
+    }
+    setInterval(updateClock, 1000); updateClock();
+
+    let toastT;
+    function showToast(msg, type = 'cyan') {
+      const icons = { green: 'check_circle', cyan: 'info', warn: 'warning', red: 'error' };
+      const tIcon = document.getElementById('t-icon');
+      if (tIcon) tIcon.textContent = icons[type] || 'info';
+
+      const tMsg = document.getElementById('t-msg');
+      if (tMsg) tMsg.textContent = msg;
+
+      const t = document.getElementById('toast');
+      if (t) {
+        t.className = 'toast ' + type + ' show';
+        clearTimeout(toastT);
+        toastT = setTimeout(() => t.classList.remove('show'), 3400);
+      }
+    }
+
+    // ════════════════════════════ GPS / MATH / ROUTE SIM ══════════════════
+    let temp = 28.4, hum = 64;
+    let _isOnline = true, _liveGpsMarker = null, _sensorFails = 0;
+
+    let _simRoute = [];
+    let _routeMarkers = [];
+    let _simStepMs = 2000;
+    let _simVehicleLat = 11.0168, _simVehicleLng = 76.9558;
+    let _simNextStopIdx = 1;
+
+    // ─── Driver Mode State ──────────────────────────────────────────────────
+    let _driverMode   = 'sim'; // 'sim' | 'live'
+    let _simPlaying   = false;
+    const _speedCycle = [1, 2, 5];
+    let _speedCycleIdx = 0;
+
+    // ─── MQTT Config (change MQTT_SESSION to share a different session) ─────
+    const MQTT_BROKER  = 'wss://broker.hivemq.com:8884/mqtt';
+    const MQTT_SESSION = 'bask-demo-02'; // must match manager.html
+    const MQTT_GPS     = `bask-solutions/${MQTT_SESSION}/gps`;
+    const MQTT_ROUTE   = `bask-solutions/${MQTT_SESSION}/route`;
+    let   mqttClient   = null;
+
+    // [AI NOTE: Mathematical Haversine function. Calculates the straight-line GPS distance between two points locally in JS. Used here for offline fail-safe logic and smooth UI simulation]
+    function haversine(lat1, lng1, lat2, lng2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function tickEtaAndDistance() {
+      const SPEED_KMH = 30;
+      const STEP_KM = SPEED_KMH * (_simStepMs / 1000) / 3600;
+
+      let currentSpeed = 0;
+      let totalRemainingDist = 0;
+
+      // SIM MODE: only advance vehicle if playing. LIVE MODE: GPS comes from LoRa bridge.
+      const _shouldMove = (_driverMode === 'sim' && _simPlaying);
+
+      if (_simRoute.length >= 2 && _simNextStopIdx < _simRoute.length) {
+        currentSpeed = _shouldMove ? (SPEED_KMH + (Math.random() * 4 - 2)).toFixed(1) : 0;
+        const nextStop  = _simRoute[_simNextStopIdx];
+        const finalStop = _simRoute[_simRoute.length - 1];
+
+        // [AI NOTE: Constantly recalculate distance from moving vehicle to the immediate next stop]
+        const dToNext = haversine(_simVehicleLat, _simVehicleLng, nextStop.lat, nextStop.lng);
+
+        if (_shouldMove) {
+          // [AI NOTE: Arrival Logic. Fade passed waypoints to 40% opacity to visually declutter]
+          if (dToNext < STEP_KM * 0.5 && _simNextStopIdx < _simRoute.length - 1) {
+            if (_routeMarkers[_simNextStopIdx]) _routeMarkers[_simNextStopIdx].setOpacity(0.4);
+            _simNextStopIdx++;
+          }
+          const frac = Math.min(STEP_KM / Math.max(dToNext, 0.001), 1);
+          _simVehicleLat += (nextStop.lat - _simVehicleLat) * frac;
+          _simVehicleLng += (nextStop.lng - _simVehicleLng) * frac;
+
+          // Publish simulated GPS to MQTT cloud — Warehouse Terminal receives this
+          if (mqttClient && mqttClient.connected) {
+            mqttClient.publish(MQTT_GPS, JSON.stringify({ lat: _simVehicleLat, lng: _simVehicleLng, source: 'sim' }), { qos: 0 });
+          }
+          ensureLiveGpsMarker(_simVehicleLat, _simVehicleLng);
+          document.getElementById('s-gps').textContent = _simVehicleLat.toFixed(5) + ', ' + _simVehicleLng.toFixed(5);
+        }
+
+        const distNext = haversine(_simVehicleLat, _simVehicleLng, nextStop.lat, nextStop.lng);
+        const etaNext  = (distNext / SPEED_KMH) * 60;
+
+        // [AI NOTE: Calculate TOTAL distance to the final stop by summing up all remaining segments]
+        totalRemainingDist = distNext;
+        for (let i = _simNextStopIdx; i < _simRoute.length - 1; i++) {
+          totalRemainingDist += haversine(_simRoute[i].lat, _simRoute[i].lng, _simRoute[i + 1].lat, _simRoute[i + 1].lng);
+        }
+        const etaFinal = (totalRemainingDist / SPEED_KMH) * 60;
+
+        // [AI NOTE: Update the 'Holy Trinity' UI on the left sidebar]
+        document.getElementById('telemetry-speed').textContent = currentSpeed + ' km/h';
+        document.getElementById('telemetry-dist').textContent  = totalRemainingDist.toFixed(2) + ' km';
+        document.getElementById('next-eta').textContent        = Math.max(1, Math.round(etaNext));
+
+        if (_simRoute.length > 2) {
+          const fi = document.getElementById('final-stop-indicator');
+          fi.style.display = 'block';
+          document.getElementById('final-stop-name').textContent = finalStop.name || 'Final Destination';
+          document.getElementById('final-stop-dist').textContent = totalRemainingDist.toFixed(2) + ' km';
+          document.getElementById('final-stop-eta').textContent  = Math.max(1, Math.round(etaFinal)) + ' min';
+        }
+      } else {
+        document.getElementById('telemetry-speed').textContent = '0 km/h';
+      }
+    }
+
+    // [AI NOTE: Uses L.divIcon to render a sleek CSS/HTML circular marker containing a Google Material Symbol, replacing Leaflet's bulky default image markers]
+    function getVehicleMarkerIcon(vtype) {
+      const msIcon = (VEHICLE_TYPES[vtype] && VEHICLE_TYPES[vtype].msIcon) || 'local_shipping';
+      return L.divIcon({
+        className: '',
+        html: `<div style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:#0A0B0D;border:2px solid #00F2FF;box-shadow:0 4px 15px rgba(0,242,255,0.4),0 0 0 4px rgba(0,242,255,0.1);">
+            <span class="ms" style="font-size:18px;color:#00F2FF;">${msIcon}</span>
+           </div>`,
+        iconSize: [34, 34], iconAnchor: [17, 17]
+      });
+    }
+
+    function ensureLiveGpsMarker(lat, lng, vtype) {
+      if (!_liveGpsMarker) {
+        _liveGpsMarker = L.marker([lat, lng], { icon: getVehicleMarkerIcon(vtype || 'truck'), zIndexOffset: 1000 }).addTo(map)
+          .bindPopup('<strong style="color:#00F2FF">Live Active Edge Node</strong>');
+      } else {
+        _liveGpsMarker.setLatLng([lat, lng]);
+        _liveGpsMarker.setIcon(getVehicleMarkerIcon(vtype || 'truck'));
+      }
+
+      // [AI NOTE: Map Follow Mode logic execution. If enabled, the map canvas continually shifts to keep the vehicle in the center]
+      if (isFollowing) map.panTo([lat, lng], { animate: true, duration: 0.5 });
+    }
+
+    async function pollSensors() {
+      try {
+        const resp = await fetch('http://localhost:8000/api/sensor', { signal: AbortSignal.timeout(3000) });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const d = await resp.json();
+        if (!d.error) {
+          _sensorFails = 0;
+          temp = d.temp_c ?? temp;
+          hum = d.humidity ?? hum;
+          document.getElementById('s-temp').textContent = temp.toFixed(1) + '°C';
+          document.getElementById('s-hum').textContent = Math.round(hum) + '%';
+          if (d.lat) document.getElementById('s-gps').textContent = d.lat.toFixed(5) + ', ' + d.lng.toFixed(5);
+          ensureLiveGpsMarker(_simVehicleLat, _simVehicleLng);
+        }
+      } catch (err) {
+        _sensorFails++;
+      }
+      tickEtaAndDistance();
+    }
+    setInterval(pollSensors, 2000);
+    pollSensors();
+
+    // ════════════════════════════ INPUT MODE & ROUTING ════════════════════════════
+    let inputMode = 'city';
+
+    function setInputMode(mode) {
+      inputMode = mode;
+      document.getElementById('wh-city-fields').style.display = mode === 'city' ? 'grid' : 'none';
+      document.getElementById('wh-coords-fields').style.display = mode === 'coords' ? 'flex' : 'none';
+      document.getElementById('mode-city').classList.toggle('active', mode === 'city');
+      document.getElementById('mode-coords').classList.toggle('active', mode === 'coords');
+      document.getElementById('dest-list').innerHTML = '';
+      destCounter = 0;
+    }
+
+    let destCounter = 0;
+    function addDestRow(initData) {
+      destCounter++;
+      const id = 'dest-' + destCounter;
+      const list = document.getElementById('dest-list');
+      const row = document.createElement('div');
+      row.className = 'dest-row'; row.id = id;
+
+      if (inputMode === 'coords') {
+        row.innerHTML = `<div class="dest-row-hdr"><span>Destination</span><button class="dest-row-remove" onclick="document.getElementById('${id}').remove()">Remove</button></div>
+      <div><label>Lat, Lng</label><input class="inp d-latlng" placeholder="e.g. 11.06061, 77.08965" value="${initData?.latlng || ''}"/></div>
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px"><div><label>Name</label><input class="inp d-name" value="${initData?.name || ''}"/></div><div><label>Load (kg)</label><input class="inp d-load" type="number" value="200"/></div></div>`;
+      } else {
+        row.innerHTML = `<div class="dest-row-hdr"><span>Destination</span><button class="dest-row-remove" onclick="document.getElementById('${id}').remove()">Remove</button></div>
+      <div><label>Place Name</label><input class="inp d-place" placeholder="e.g. PSG Hospital"/></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label>Pincode</label><input class="inp d-pin" placeholder="641004"/></div><div><label>Load (kg)</label><input class="inp d-load" type="number" value="200"/></div></div>`;
+      }
+      list.appendChild(row);
+    }
+
+    function selectVType(rowId, vtype) {
+      const c = document.getElementById('vtype-' + rowId);
+      if (!c) return;
+      c.querySelectorAll('.vtype-btn').forEach(b => b.classList.toggle('active', b.dataset.vtype === vtype));
+    }
+
+    function parseLLField(val) {
+      const parts = val.trim().replace(/\s+/g, ' ').split(/[,\s]+/);
+      if (parts.length < 2) return null;
+      return { lat: parseFloat(parts[0]), lng: parseFloat(parts[1]) };
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    function animatePolyline(pts, color, weight = 4) {
+      return new Promise(resolve => {
+        const total = pts.length - 1;
+        if (total < 1) { resolve(); return; }
+        const step = Math.max(1, Math.floor(total / 40));
+        let drawn = 0; let lastLine = null;
+        function tick() {
+          const upto = Math.min(drawn + step, total);
+          if (lastLine) { routeLayer.removeLayer(lastLine); }
+          lastLine = L.polyline(pts.slice(0, upto + 1), { color, weight, opacity: 0.92, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
+          drawn = upto;
+          if (drawn < total) { requestAnimationFrame(tick); } else { resolve(); }
+        }
+        requestAnimationFrame(tick);
+      });
+    }
+
+    function placeNodeMarker(p, i, color) {
+      const isOrigin = i === 0;
+      const label = isOrigin ? 'W' : String(i);
+      const ic = L.divIcon({
+        className: '',
+        html: `<div class="node-pop"><div style="background:${color};width:26px;height:26px;border-radius:50%;border:3px solid #0A0B0D;box-shadow:0 0 14px ${color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#001b20;font-family:Inter,sans-serif">${label}</div></div>`,
+        iconSize: [26, 26], iconAnchor: [13, 13]
+      });
+      const marker = L.marker([p.lat, p.lng], { icon: ic }).addTo(stopLayer).bindPopup(`<strong style="color:${color}">${isOrigin ? 'Warehouse' : 'Stop ' + i}: ${p.name || p.place || 'Dest'}</strong>`);
+
+      // [AI NOTE: We store these newly placed Leaflet markers in an array so that tickEtaAndDistance() can easily target and fade them later when the vehicle passes them]
+      _routeMarkers[i] = marker;
+    }
+
+    async function animateFullRoute(route, geomPts, palette) {
+      routeLayer.clearLayers();
+      stopLayer.clearLayers();
+      _routeMarkers = [];
+
+      placeNodeMarker(route[0], 0, '#00F2FF');
+      await sleep(200);
+
+      const totalPts = geomPts.length;
+      let wpIndices = [0];
+      for (let i = 1; i < route.length - 1; i++) {
+        let bestDist = Infinity;
+        let bestIdx = wpIndices[i-1];
+        for (let j = wpIndices[i-1]; j < geomPts.length; j++) {
+           const d = haversine(route[i].lat, route[i].lng, geomPts[j][0], geomPts[j][1]);
+           if (d < bestDist) {
+              bestDist = d;
+              bestIdx = j;
+           }
+        }
+        wpIndices.push(bestIdx);
+      }
+      wpIndices.push(geomPts.length - 1);
+
+      let startIndex = 0;
+      for (let i = 1; i < route.length; i++) {
+        const color = palette[i % palette.length];
+        const endIndex = wpIndices[i];
+        const segPts = geomPts.slice(startIndex, endIndex + 1);
+        
+        if (segPts.length >= 2) {
+          L.polyline(segPts, { color: color, weight: 12, opacity: 0.15 }).addTo(routeLayer);
+          await animatePolyline(segPts, color, 5);
+        }
+        placeNodeMarker(route[i], i, color);
+        startIndex = endIndex;
+        await sleep(120);
+      }
+    }
+
+    // ════════════════════════════ RUN OPTIMIZATION ════════════════════════════
+    async function runOptimize() {
+      const rows = document.querySelectorAll('.dest-row');
+      if (rows.length < 1) { showToast('Add at least 1 destination', 'warn'); return; }
+
+      const btn = document.getElementById('run-opt-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loader"></span> Processing...';
+
+      try {
+        let body, endpoint;
+
+        // [AI NOTE: Branching Logic based on mode. The Python backend expects different JSON payloads for raw coordinates vs. text-based city/pincodes]
+        if (inputMode === 'coords') {
+          const whLL = parseLLField(document.getElementById('wh-latlng').value);
+          if (!whLL) throw new Error("Invalid Warehouse Coords");
+
+          const whVBtn = document.querySelector('#vtype-wh .vtype-btn.active');
+          const globalVehicleType = whVBtn ? whVBtn.dataset.vtype : "van";
+
+          const destinations = Array.from(rows).map(r => {
+            const ll = parseLLField(r.querySelector('.d-latlng').value);
+            if (!ll) throw new Error("Invalid Dest Coords");
+            return {
+              name: r.querySelector('.d-name').value || "Destination",
+              lat: ll.lat,
+              lng: ll.lng,
+              vehicle_type: globalVehicleType,
+              load_kg: parseFloat(r.querySelector('.d-load').value) || 200.0
+            };
+          });
+
+          endpoint = 'http://localhost:8000/api/optimize/coords';
+          body = JSON.stringify({
+            destinations: destinations,
+            warehouse_lat: whLL.lat,
+            warehouse_lng: whLL.lng,
+            warehouse_name: document.getElementById('wh-name').value || "Warehouse"
+          });
+
+        } else {
+          // [AI NOTE: City Mode. Relies on the Python backend's internal 'geocode_place_pincode' function to map the text to accurate OSM GPS coordinates]
+          const whPlace = document.getElementById('wh-place').value;
+          const whPin = document.getElementById('wh-pincode').value;
+          if (!whPlace || !whPin) throw new Error("Warehouse Place and Pincode are required");
+
+          const whVBtn = document.querySelector('#vtype-wh .vtype-btn.active');
+          const globalVehicleType = whVBtn ? whVBtn.dataset.vtype : "van";
+
+          const destinations = Array.from(rows).map(r => {
+            const place = r.querySelector('.d-place').value;
+            const pin = r.querySelector('.d-pin').value;
+            if (!place || !pin) throw new Error("Destination Place and Pincode required for all stops");
+            return {
+              name: place,
+              place: place,
+              pincode: pin,
+              vehicle_type: globalVehicleType,
+              load_kg: parseFloat(r.querySelector('.d-load').value) || 200.0
+            };
+          });
+
+          endpoint = 'http://localhost:8000/api/optimize';
+          body = JSON.stringify({
+            destinations: destinations,
+            warehouse_place: whPlace,
+            warehouse_pincode: whPin
+          });
+        }
+
+        const resp = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        if (!resp.ok) {
+          const errData = await resp.text();
+          throw new Error(`Server Error ${resp.status}: ${errData}`);
+        }
+
+        const data = await resp.json();
+        await renderOptimizedRoute(data);
+
+      } catch (err) {
+        console.error("Optimization Error:", err);
+        showToast("Using prototype fallback simulation due to error: " + err.message, 'warn');
+
+        const fallbackRoute = [
+          { name: "Warehouse Alpha", lat: 11.0168, lng: 76.9558 },
+          { name: "PSG Hospital", lat: 11.0245, lng: 77.0040 },
+          { name: "Royal Care", lat: 11.0543, lng: 77.0700 }
+        ];
+        await renderOptimizedRoute({ ordered_route: fallbackRoute, segment_details: [], total_distance_km: 14.5, total_time_min: 35 });
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="ms" style="font-size:15px">auto_fix_high</span> Run Optimization';
+
+        // [AI NOTE: Progressive Disclosure. The terminal map view maximizes automatically by collapsing side menus once planning finishes]
+        minimizeTerminalPanel();
+        if (sidebarOpen) toggleSidebar();
+      }
+    }
+
+    async function renderOptimizedRoute(data) {
+      const route = data.ordered_route || [];
+      const palette = ['#00FFAB', '#FFD700', '#FF8E53', '#C084FC'];
+
+      // [AI NOTE: Coordinate Correction Failsafe. OSRM API returns [Longitude, Latitude] which breaks Leaflet. This logic detects if the coordinates are swapped for the India region and flips them to [Latitude, Longitude] so the real road geometry traces perfectly over the map.]
+      let geomRaw = [];
+      if (data.geometry && data.geometry.length > 0) {
+        if (data.geometry[0][0] > 70 && data.geometry[0][1] < 20) {
+          geomRaw = data.geometry.map(coord => [coord[1], coord[0]]);
+        } else {
+          geomRaw = data.geometry;
+        }
+      } else {
+        geomRaw = route.map(p => [p.lat, p.lng]);
+      }
+
+      const bounds = route.map(p => [p.lat, p.lng]);
+      if (bounds.length >= 2) { map.flyToBounds(bounds, { padding: [80, 80], duration: 1.0 }); }
+
+      // [AI NOTE: Activates Follow Mode so the map centers onto the moving vehicle immediately after routing]
+      isFollowing = true;
+
+      _simRoute = route;
+      _simVehicleLat = route[0].lat;
+      _simVehicleLng = route[0].lng;
+      _simNextStopIdx = 1;
+
+      // [AI NOTE: Dynamic DOM Injection. Clears the empty terminal list and actively builds the specific waypoints the AI Engine just calculated.]
+      stops.length = 0;
+      for (let i = 1; i < route.length; i++) {
+        stops.push({
+          id: i,
+          name: route[i].name || route[i].place || `Destination ${i}`,
+          status: i === 1 ? 'in-progress' : 'pending',
+          eta: '--:--',
+          weight: route[i].load_kg || route[i].load || 200,
+          truck: 'TRK-001'
+        });
+      }
+      renderStops();
+      // [AI NOTE: Pops open the terminal schedule panel to show the freshly generated list]
+      restoreTerminalPanel();
+
+      await sleep(1200);
+      await animateFullRoute(route, geomRaw, palette);
+
+      if (route.length >= 2) {
+        document.getElementById('next-stop-name').textContent = route[1].name || route[1].place || 'Next Stop';
+      }
+      document.getElementById('route-result').style.display = 'block';
+
+      // Show SIM controls now that a route is ready (SIM mode only)
+      if (_driverMode === 'sim') {
+        document.getElementById('sim-controls').style.display = 'flex';
+      }
+
+      // Publish the corridor to MQTT so Warehouse Terminal loads it instantly
+      syncRouteToWarehouse(geomRaw);
+    }
+
+    // ════════════════════════════ SIDEBAR & PANELS ════════════════════════════
+    let sidebarOpen = true;
+    function toggleSidebar() {
+      sidebarOpen = !sidebarOpen;
+      const sb = document.getElementById('left-sidebar');
+      const tab = document.getElementById('sidebar-toggle-tab');
+      const main = document.getElementById('main-map-area');
+      if (sidebarOpen) {
+        sb.classList.remove('collapsed');
+        tab.classList.remove('collapsed');
+        main.style.marginLeft = '272px';
+      } else {
+        sb.classList.add('collapsed');
+        tab.classList.add('collapsed');
+        main.style.marginLeft = '0';
+      }
+      setTimeout(() => map.invalidateSize(), 320);
+    }
+
+    function minimizeTerminalPanel() {
+      document.getElementById('panel-terminal').style.display = 'none';
+      document.getElementById('terminal-stub').style.display = 'flex';
+    }
+    function restoreTerminalPanel() {
+      document.getElementById('terminal-stub').style.display = 'none';
+      document.getElementById('panel-terminal').style.display = 'flex';
+    }
+
+    // ════════════════════════════ INIT ════════════════════════════
+    // [AI NOTE: Terminal is now hidden by default on boot, leaving the map completely clean]
+    document.getElementById('panel-terminal').style.display = 'none';
+    document.getElementById('terminal-stub').style.display = 'flex';
+    document.getElementById('panel-fleet').style.display = 'none';
+    document.getElementById('panel-inventory').style.display = 'none';
+
+    renderStops();
+    renderFleet();
+    renderInventory();
+    renderAlerts();
+
+    setTimeout(() => showToast('Edge connection established · GPS locked', 'green'), 600);
+    setTimeout(() => map.invalidateSize(), 200);
+    window.addEventListener('resize', () => map.invalidateSize());
+
+    // ════════════════════════════ BRIDGE: SYNC ROUTE TO WAREHOUSE ════════════════
+    /**
+     * syncRouteToWarehouse(osrmCoordinatesArray)
+     *
+     * Takes the currently active OSRM route geometry (array of [lat, lng] pairs)
+     * and persists it to localStorage as the 'baskGoldenRoute'.
+     *
+     * The Warehouse Terminal (manager.html) reads this key on load and uses the
+     * allowedCorridor to run deviation checks against live LoRa GPS telemetry.
+     *
+     * @param {Array} osrmCoordinatesArray - Array of [lat, lng] pairs from OSRM.
+     *   If omitted, the function will attempt to derive coordinates from the
+     *   current _simRoute (the active planned route waypoints).
+     */
+    function syncRouteToWarehouse(osrmCoordinatesArray) {
+      // --- Resolve the coordinate array ---
+      let routeArray = osrmCoordinatesArray;
+
+      // Fallback: if no explicit array passed, build one from the live sim route
+      if (!routeArray || routeArray.length < 2) {
+        if (_simRoute && _simRoute.length >= 2) {
+          routeArray = _simRoute.map(p => [p.lat, p.lng]);
+        } else {
+          showToast('No active route to sync. Run Optimization first.', 'warn');
+          return;
+        }
+      }
+
+      const goldenRoute = {
+        timestamp: new Date().toISOString(),
+        primaryRoute: routeArray,
+        allowedCorridor: [routeArray],
+        waypoints: _simRoute
+      };
+
+      try {
+        localStorage.setItem('baskGoldenRoute', JSON.stringify(goldenRoute));
+        console.log('[BASK Bridge] Golden Route cached to localStorage.');
+      } catch (e) {
+        console.warn('[BASK Bridge] localStorage write failed:', e);
+      }
+
+      // Publish to MQTT so Warehouse on ANY device/browser receives the corridor
+      if (mqttClient && mqttClient.connected) {
+        mqttClient.publish(MQTT_ROUTE, JSON.stringify(goldenRoute), { qos: 1, retain: true });
+        showToast('✓ Secure Corridor broadcast via MQTT cloud.', 'green');
+        console.log('[BASK Bridge] Route published to MQTT:', MQTT_ROUTE);
+      } else {
+        showToast('✓ Corridor saved locally (MQTT reconnecting…)', 'warn');
+      }
+    }
+
+    // ══════════════════════════ MQTT INIT + MODE LOGIC ═════════════════════
+    function mqttConnect() {
+      const clientId = 'bask-driver-' + Math.random().toString(16).slice(2, 10);
+      mqttClient = mqtt.connect(MQTT_BROKER, {
+        clientId,
+        clean: true,
+        reconnectPeriod: 4000,
+        connectTimeout: 15000,
+      });
+      mqttClient.on('connect', () => {
+        console.log('[MQTT] Connected to HiveMQ broker.');
+        showToast('MQTT Cloud Bridge connected ✓', 'green');
+      });
+      mqttClient.on('reconnect', () => console.warn('[MQTT] Reconnecting…'));
+      mqttClient.on('error', err  => console.error('[MQTT] Error:', err.message));
+    }
+
+    // ─── SIM Mode Controls ─────────────────────────────────────────────────
+    function simPlay() {
+      if (_simRoute.length < 2) { showToast('Plan a route first', 'warn'); return; }
+      _simPlaying = true;
+      document.getElementById('sim-play-btn').style.display  = 'none';
+      document.getElementById('sim-pause-btn').style.display = 'flex';
+      showToast('Simulation running — broadcasting to Warehouse •••', 'cyan');
+    }
+    function simPause() {
+      _simPlaying = false;
+      document.getElementById('sim-play-btn').style.display  = 'flex';
+      document.getElementById('sim-pause-btn').style.display = 'none';
+    }
+    function simReset() {
+      simPause();
+      if (_simRoute.length > 0) {
+        _simVehicleLat  = _simRoute[0].lat;
+        _simVehicleLng  = _simRoute[0].lng;
+        _simNextStopIdx = 1;
+        ensureLiveGpsMarker(_simVehicleLat, _simVehicleLng);
+      }
+    }
+    function cycleSimSpeed() {
+      _speedCycleIdx = (_speedCycleIdx + 1) % _speedCycle.length;
+      _simStepMs = 2000 * _speedCycle[_speedCycleIdx]; // more ms = bigger step per tick
+      document.getElementById('sim-speed-btn').textContent = `${_speedCycle[_speedCycleIdx]}×`;
+    }
+
+    // ─── LIVE Mode: relay LoRa bridge → MQTT ──────────────────────────────
+    let _liveWs = null, _liveWsTimer = null;
+    function connectLoraBridge() {
+      if (_liveWs && _liveWs.readyState === WebSocket.OPEN) return;
+      _liveWs = new WebSocket('ws://localhost:8765');
+      _liveWs.onopen  = () => { showToast('LoRa bridge connected', 'green'); clearTimeout(_liveWsTimer); };
+      _liveWs.onmessage = (e) => {
+        if (_driverMode !== 'live') return;
+        const raw = e.data.trim();
+        if (raw.startsWith('ERROR:')) return;
+        const [latStr, lngStr] = raw.split(',');
+        const lat = parseFloat(latStr), lng = parseFloat(lngStr);
+        if (isNaN(lat) || isNaN(lng)) return;
+        ensureLiveGpsMarker(lat, lng);
+        document.getElementById('s-gps').textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
+        if (mqttClient && mqttClient.connected) {
+          mqttClient.publish(MQTT_GPS, JSON.stringify({ lat, lng, source: 'lora' }), { qos: 0 });
+        }
+      };
+      _liveWs.onerror = () => console.warn('[LIVE] lora_bridge error');
+      _liveWs.onclose = () => { if (_driverMode === 'live') _liveWsTimer = setTimeout(connectLoraBridge, 5000); };
+    }
+
+    // ─── Mode Switch ───────────────────────────────────────────────────────
+    function setDriverMode(mode) {
+      _driverMode = mode;
+      const simBtn  = document.getElementById('mode-btn-sim');
+      const liveBtn = document.getElementById('mode-btn-live');
+      if (mode === 'sim') {
+        simBtn.className  = 'px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase transition-all bg-[#00F2FF]/20 text-[#00F2FF] border border-[#00F2FF]/40';
+        liveBtn.className = 'px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase transition-all text-white/40 border border-transparent';
+        if (_liveWs) { _liveWs.close(); _liveWs = null; }
+        showToast('Simulation Mode active', 'cyan');
+      } else {
+        liveBtn.className = 'px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase transition-all bg-[#00FFAB]/20 text-[#00FFAB] border border-[#00FFAB]/40';
+        simBtn.className  = 'px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase transition-all text-white/40 border border-transparent';
+        simPause();
+        document.getElementById('sim-controls').style.display = 'none';
+        showToast('Live LoRa Mode — connecting to bridge…', 'warn');
+        connectLoraBridge();
+      }
+    }
+
+    // Pre-populate 5 default destinations
+    setInputMode('coords');
+    [
+      { name: 'PSG TECH', latlng: '11.024335495850682, 77.00277822604103' },
+      { name: 'PSG ITECH', latlng: '11.065548829663886, 77.09277929541271' },
+      { name: 'KPR CAS', latlng: '11.081727632349367, 77.1352615547495' },
+      { name: 'KPR pazhamudir', latlng: '11.113217584872373, 77.02589135760849' },
+      { name: 'brookefields', latlng: '11.010742514825607, 76.95883724072308' }
+    ].forEach(d => addDestRow(d));
+
+    // Boot MQTT on page load
+    mqttConnect();
+
+
+  </script>
+</body>
+
+</html>

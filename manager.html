@@ -1,0 +1,1231 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BASK | Warehouse Manager</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- MQTT.js — cloud bridge via HiveMQ (works from file:// and localhost) -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0A0B0D;
+            overflow: hidden;
+        }
+
+        .grid-overlay {
+            background-image: radial-gradient(circle, rgba(58, 73, 75, 0.15) 1px, transparent 1px);
+            background-size: 24px 24px;
+            pointer-events: none;
+        }
+
+        .leaflet-container {
+            background: #0A0B0D !important;
+            cursor: crosshair;
+        }
+
+        .leaflet-control-attribution {
+            display: none;
+        }
+
+        .leaflet-overlay-pane img {
+            filter: grayscale(1) brightness(1.8) contrast(0.7);
+            opacity: 0.55 !important;
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        /* Map Markers */
+        .neon-gps-marker {
+            background-color: #00F2FF;
+            border-radius: 50%;
+            box-shadow: 0 0 15px 5px rgba(0, 242, 255, 0.4);
+            border: 2px solid #FFF;
+            transition: transform 0.1s linear;
+        }
+
+        .waypoint-dot {
+            background-color: #FFF;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+            border: 2px solid #00F2FF;
+        }
+
+        .waypoint-number {
+            background-color: #00FFAB;
+            color: #000;
+            font-weight: bold;
+            font-size: 10px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 15px rgba(0, 255, 171, 0.6);
+            border: 2px solid #FFF;
+        }
+
+        /* Route Animation */
+        path.leaflet-interactive.route-flow {
+            stroke-dasharray: 6 12;
+            animation: flow-route 1.5s linear infinite;
+        }
+
+        @keyframes flow-route {
+            100% {
+                stroke-dashoffset: -18;
+            }
+        }
+
+        .btn-glow {
+            /* [BRIDGE FIX] Explicit property list prevents layout-triggering redraws on hover */
+            background: rgba(0, 242, 255, 0.1);
+            border: 1px solid rgba(0, 242, 255, 0.3);
+            color: #00F2FF;
+            transition: background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+
+        .btn-glow:hover:not(:disabled) {
+            background: rgba(0, 242, 255, 0.2);
+            box-shadow: 0 0 15px rgba(0, 242, 255, 0.3);
+        }
+
+        .btn-glow:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            border-color: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .tab-link.active {
+            color: #FFF;
+            border-bottom: 2px solid #00F2FF;
+            padding-bottom: 4px;
+        }
+
+        .view-panel {
+            transition: opacity 0.4s ease, z-index 0.4s;
+            position: absolute;
+            inset: 0;
+        }
+
+        .hidden-panel {
+            opacity: 0;
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        .active-panel {
+            opacity: 1;
+            z-index: 30;
+        }
+
+        .manifest-item {
+            transition: all 0.4s ease;
+        }
+
+        /* Slide animation for Cargo/Alerts */
+        .panel-open {
+            transform: translateX(0) !important;
+        }
+    </style>
+</head>
+
+<body class="text-white h-screen flex flex-col selection:bg-[#00F2FF] selection:text-black">
+
+    <header
+        class="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-[#0A0B0D]/90 backdrop-blur-md z-50 relative">
+        <div class="flex items-center gap-10">
+            <div class="font-bold tracking-widest text-[#00F2FF] text-sm">WAREHOUSE MANAGER</div>
+            <nav class="flex gap-8 text-xs font-mono text-white/50 mt-1" id="main-nav">
+                <a href="#" onclick="switchTab('overview')" id="tab-overview-link"
+                    class="tab-link active hover:text-white transition-colors">OVERVIEW</a>
+                <a href="#" onclick="switchTab('fleet')" id="tab-fleet-link"
+                    class="tab-link hover:text-white transition-colors">FLEET</a>
+                <a href="#" onclick="switchTab('ai')" id="tab-ai-link"
+                    class="tab-link hover:text-white transition-colors">AI ROUTING</a>
+            </nav>
+        </div>
+
+        <div class="flex items-center gap-4 bg-white/5 px-4 py-1.5 rounded-full border border-white/10">
+            <div class="text-[10px] text-white/60 font-mono tracking-wider" id="routing-status">Awaiting Waypoints
+                (0/10)</div>
+            <button id="confirm-route-btn" disabled
+                class="btn-glow px-3 py-1 rounded text-xs font-bold tracking-wider uppercase" style="display:none;">Optimize Route</button>
+            <button id="reset-route-btn" class="text-white/40 hover:text-white text-xs px-2">✕</button>
+        </div>
+
+        <div class="flex items-center gap-4 text-xs font-mono">
+            <span class="text-white/50" id="clock-display">00:00:00 IST</span>
+            <div class="w-2 h-2 rounded-full bg-[#00FFAB] shadow-[0_0_10px_#00FFAB] animate-pulse"></div>
+        </div>
+    </header>
+
+    <main class="flex-1 relative flex">
+
+        <aside class="w-16 border-r border-white/10 bg-[#0F1115] flex flex-col items-center py-6 gap-8 z-40 relative">
+            <button onclick="togglePanel('cargo')"
+                class="text-white/40 hover:text-[#00F2FF] transition-colors relative group">
+                <span class="material-symbols-outlined text-[20px]">grid_view</span>
+                <span
+                    class="absolute left-10 top-1/2 -translate-y-1/2 bg-white text-black text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">CARGO</span>
+            </button>
+            <button onclick="switchTab('fleet')" class="text-[#00F2FF] transition-colors relative group">
+                <span class="material-symbols-outlined text-[20px]">local_shipping</span>
+                <span
+                    class="absolute left-10 top-1/2 -translate-y-1/2 bg-white text-black text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">FLEET</span>
+            </button>
+            <button onclick="togglePanel('alerts')"
+                class="text-white/40 hover:text-[#FF4D4D] transition-colors relative group">
+                <span class="material-symbols-outlined text-[20px]">warning</span>
+                <span
+                    class="absolute left-10 top-1/2 -translate-y-1/2 bg-white text-black text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">ALERTS</span>
+            </button>
+            <button onclick="togglePanel('hw')"
+                class="text-white/40 hover:text-[#FFD700] transition-colors relative group">
+                <span class="material-symbols-outlined text-[20px]">developer_board</span>
+                <span
+                    class="absolute left-10 top-1/2 -translate-y-1/2 bg-white text-black text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">HARDWARE LOGS</span>
+            </button>
+        </aside>
+
+        <div id="hw-panel"
+            class="absolute left-16 top-0 bottom-0 w-[360px] bg-[#0A0B0D]/95 backdrop-blur-xl border-r border-white/10 z-30 transform -translate-x-full transition-transform duration-500 ease-in-out p-6 overflow-y-auto shadow-[20px_0_30px_rgba(0,0,0,0.5)]">
+            <div class="flex justify-between items-center mb-8 border-b border-white/10 pb-4">
+                <div>
+                    <h2 class="text-lg font-light text-white leading-tight">Hardware <span
+                            class="font-bold text-[#FFD700]">Logs</span></h2>
+                    <p class="text-[10px] text-white/50 uppercase tracking-widest mt-1">Live Sensor Telemetry</p>
+                </div>
+                <button onclick="closeAllPanels()"
+                    class="text-white/40 hover:text-white transition-colors bg-white/5 p-1 rounded"><span
+                        class="material-symbols-outlined text-[16px]">close</span></button>
+            </div>
+            
+            <div class="space-y-4">
+                <div class="bg-[#0F1115] border border-white/10 rounded p-4">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                        <div class="text-[10px] uppercase text-white/55 tracking-widest font-semibold">Weather (DHT22)</div>
+                        <span id="s-weather-icon" style="font-size:20px">🌤</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                        <div>
+                            <div style="font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:2px">Temp</div>
+                            <div class="text-xl font-mono" id="s-temp" style="color:#FFD700">28.4°C</div>
+                        </div>
+                        <div>
+                            <div style="font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:2px">Humidity</div>
+                            <div class="text-xl font-mono" id="s-hum" style="color:#00F2FF">64%</div>
+                        </div>
+                    </div>
+                    <div class="text-[11px] mt-2" id="s-weather-status" style="color:rgba(0,255,171,0.8)">Clear · Cargo safe</div>
+                </div>
+                
+                <div class="bg-[#0F1115] border border-white/10 rounded p-4">
+                    <div class="text-[10px] uppercase text-white/55 mb-2 tracking-widest font-semibold">Traffic</div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                        <div class="text-xl font-mono" id="s-traffic-mult" style="color:#FFD700">1.35×</div>
+                        <div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden">
+                            <div id="s-traffic-bar"
+                                style="height:100%;width:40%;background:#FFD700;border-radius:3px;transition:width 0.6s,background 0.6s">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-[11px]" id="s-traffic-label" style="color:#FFD700">Peak daytime</div>
+                </div>
+                
+                <div class="bg-[#0F1115] border border-white/10 rounded p-4">
+                    <div class="text-[10px] uppercase text-white/55 mb-2 tracking-widest font-semibold">GPS (AT6668)</div>
+                    <div class="text-[13px] font-mono text-[#00FFAB]" id="s-gps">11.0168, 76.9558</div>
+                    <div class="text-[11px] text-white/60 mt-1">Lock · ±2.3m accuracy</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="cargo-panel"
+            class="absolute left-16 top-0 bottom-0 w-80 bg-[#0A0B0D]/95 backdrop-blur-xl border-r border-white/10 z-30 transform -translate-x-full transition-transform duration-500 ease-in-out p-6 overflow-y-auto shadow-[20px_0_30px_rgba(0,0,0,0.5)]">
+            <div class="flex justify-between items-center mb-8 border-b border-white/10 pb-4">
+                <div>
+                    <h2 class="text-lg font-light text-white leading-tight">Cargo <span
+                            class="font-bold text-[#00F2FF]">Manifest</span></h2>
+                    <p class="text-[10px] text-white/50 uppercase tracking-widest mt-1">Live Asset Payload</p>
+                </div>
+                <button onclick="closeAllPanels()"
+                    class="text-white/40 hover:text-white transition-colors bg-white/5 p-1 rounded"><span
+                        class="material-symbols-outlined text-[16px]">close</span></button>
+            </div>
+            <div id="cargo-list" class="space-y-3 pb-8">
+                <div class="text-xs text-white/40 text-center mt-10">No active waypoints.<br>Drop pins on the map to
+                    load cargo.</div>
+            </div>
+        </div>
+
+        <div id="alerts-panel"
+            class="absolute left-16 top-0 bottom-0 w-[360px] bg-[#0A0B0D]/95 backdrop-blur-xl border-r border-white/10 z-30 transform -translate-x-full transition-transform duration-500 ease-in-out p-6 overflow-y-auto shadow-[20px_0_30px_rgba(0,0,0,0.5)]">
+            <div class="flex justify-between items-center mb-8 border-b border-white/10 pb-4">
+                <div>
+                    <h2 class="text-lg font-light text-white leading-tight">System <span
+                            class="font-bold text-[#FF4D4D]">Alerts</span></h2>
+                    <p class="text-[10px] text-white/50 uppercase tracking-widest mt-1">Diagnostics & Resolution</p>
+                </div>
+                <button onclick="closeAllPanels()"
+                    class="text-white/40 hover:text-white transition-colors bg-white/5 p-1 rounded"><span
+                        class="material-symbols-outlined text-[16px]">close</span></button>
+            </div>
+            <div id="detailed-alerts-list" class="space-y-4 pb-8">
+            </div>
+        </div>
+
+        <div class="flex-1 relative overflow-hidden">
+
+            <div class="absolute inset-0 grid-overlay z-10"></div>
+            <div id="warehouse-map" class="absolute inset-0 z-0"></div>
+
+            <div id="view-overview"
+                class="view-panel active-panel pointer-events-none p-6 flex justify-between items-start">
+
+                <div id="overview-left-panel"
+                    class="flex flex-col gap-6 w-72 pointer-events-auto transition-opacity duration-500 opacity-100">
+                    <div class="bg-[#0F1115]/90 backdrop-blur-md border border-white/10 p-5 rounded-lg shadow-lg">
+                        <div class="text-[10px] uppercase tracking-widest text-white/50 mb-4 flex justify-between">
+                            <span>System Alerts</span><span class="text-[#FF4D4D]" id="alert-count">0 ACTIVE</span>
+                        </div>
+                        <ul class="space-y-4" id="dynamic-alerts-list"></ul>
+                    </div>
+                    <div
+                        class="bg-[#0F1115]/90 backdrop-blur-md border border-white/10 p-5 rounded-lg flex-1 max-h-[40vh] overflow-y-auto shadow-lg">
+                        <div class="text-[10px] uppercase tracking-widest text-white/50 mb-4 flex justify-between">
+                            <span>Active Assets</span><span class="text-[#00F2FF]">1 DEPLOYED</span>
+                        </div>
+                        <div class="space-y-3" id="dynamic-fleet-list"></div>
+                    </div>
+                </div>
+
+                <div class="flex flex-col gap-4 w-80 h-full pointer-events-none justify-end">
+                    <div class="w-full bg-[#0F1115]/90 backdrop-blur-md border border-white/10 p-5 rounded-lg flex flex-col pointer-events-auto max-h-[50vh] transition-opacity duration-500 shadow-lg"
+                        id="manifest-panel" style="opacity: 0;">
+                        <div
+                            class="text-[10px] uppercase tracking-widest text-white/50 mb-3 flex justify-between items-center">
+                            <span>Live Route Manifest</span>
+                            <span class="text-[#00F2FF] bg-[#00F2FF]/10 px-2 py-0.5 rounded" id="manifest-count">0
+                                STOPS</span>
+                        </div>
+                        <div class="overflow-y-auto space-y-2 flex-1 pr-1" id="manifest-list"></div>
+                    </div>
+
+                    <div class="w-full bg-[#0F1115]/90 backdrop-blur-md border border-[#00F2FF]/30 p-6 rounded-lg text-right flex justify-between items-center shadow-[0_0_30px_rgba(0,242,255,0.1)] pointer-events-auto transition-opacity duration-500"
+                        id="eta-panel" style="opacity: 0;">
+                        <div class="text-left flex-1">
+                            <div class="text-xs font-bold text-[#00F2FF] mb-1" id="eta-badge-text">ROUTING</div>
+                            <div class="text-[10px] text-white/50 uppercase tracking-widest">A* / TSP Engine</div>
+                        </div>
+                        <div class="h-8 w-px bg-white/10 mx-4"></div>
+                        <div>
+                            <div class="text-[10px] uppercase tracking-widest text-white/50 mb-1">Route ETA</div>
+                            <div class="text-3xl font-light font-mono text-white whitespace-nowrap"><span
+                                    id="dynamic-eta">--</span> <span class="text-sm text-[#00F2FF]">MIN</span></div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <div id="view-fleet"
+                class="view-panel hidden-panel pointer-events-auto bg-[#0A0B0D]/95 backdrop-blur-xl p-8 overflow-y-auto">
+                <h2 class="text-xl font-light text-white mb-6">Fleet <span
+                        class="font-bold text-[#00F2FF]">Manifest</span></h2>
+                <div class="bg-[#0F1115] border border-white/10 rounded-lg overflow-hidden">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-white/5 text-white/50 text-[10px] uppercase tracking-widest">
+                            <tr>
+                                <th class="px-6 py-4">Asset ID</th>
+                                <th class="px-6 py-4">Status</th>
+                                <th class="px-6 py-4">Hardware (Temp/Hum/Spd)</th>
+                                <th class="px-6 py-4">Route Risk</th>
+                                <th class="px-6 py-4">ETA</th>
+                                <th class="px-6 py-4 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-white/5" id="full-fleet-table">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="view-ai"
+                class="view-panel hidden-panel pointer-events-auto bg-[#0A0B0D]/95 backdrop-blur-xl p-8 overflow-y-auto">
+                <div class="flex justify-between items-end mb-8">
+                    <h2 class="text-xl font-light text-white">Edge AI <span
+                            class="font-bold text-[#00F2FF]">Diagnostics</span></h2>
+                    <div
+                        class="flex items-center gap-2 bg-[#00FFAB]/10 text-[#00FFAB] px-3 py-1 rounded border border-[#00FFAB]/30 text-xs font-mono">
+                        <div class="w-2 h-2 bg-[#00FFAB] rounded-full animate-pulse"></div>
+                        OFFLINE INFERENCE: ACTIVE
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-8">
+                    <div class="bg-[#0F1115] border border-white/10 p-6 rounded-lg">
+                        <h3 class="text-xs uppercase tracking-widest text-white/50 mb-6">Current Route Risk Factors
+                            (Random Forest)</h3>
+                        <div class="space-y-5">
+                            <div>
+                                <div class="flex justify-between text-xs mb-2"><span>Traffic Density Penalty</span><span
+                                        class="font-mono text-[#F59E0B]" id="ai-stat-1">0%</span></div>
+                                <div class="w-full bg-white/5 rounded-full h-1.5">
+                                    <div class="bg-[#F59E0B] h-1.5 rounded-full progress-bar-fill" id="ai-bar-1"
+                                        style="width: 0%"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between text-xs mb-2"><span>Weather Impact</span><span
+                                        class="font-mono text-[#00FFAB]" id="ai-stat-2">0%</span></div>
+                                <div class="w-full bg-white/5 rounded-full h-1.5">
+                                    <div class="bg-[#00FFAB] h-1.5 rounded-full progress-bar-fill" id="ai-bar-2"
+                                        style="width: 0%"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between text-xs mb-2"><span>Road Type (Intersection
+                                        Density)</span><span class="font-mono text-[#FF4D4D]" id="ai-stat-3">0%</span>
+                                </div>
+                                <div class="w-full bg-white/5 rounded-full h-1.5">
+                                    <div class="bg-[#FF4D4D] h-1.5 rounded-full progress-bar-fill" id="ai-bar-3"
+                                        style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-rows-2 gap-6">
+                        <div
+                            class="bg-[#0F1115] border border-[#00F2FF]/20 p-6 rounded-lg flex items-center justify-between shadow-[0_0_15px_rgba(0,242,255,0.05)]">
+                            <div>
+                                <div class="text-xs uppercase tracking-widest text-[#00F2FF] mb-1">Est. Time Saved</div>
+                                <div class="text-sm text-white/50">Compared to default routing</div>
+                            </div>
+                            <div class="text-4xl font-light font-mono text-white" id="ai-time-saved">-- <span
+                                    class="text-sm text-[#00F2FF]">MIN</span></div>
+                        </div>
+                        <div
+                            class="bg-[#0F1115] border border-[#00FFAB]/20 p-6 rounded-lg flex items-center justify-between shadow-[0_0_15px_rgba(0,255,171,0.05)]">
+                            <div>
+                                <div class="text-xs uppercase tracking-widest text-[#00FFAB] mb-1">Projected Fuel Saved
+                                </div>
+                                <div class="text-sm text-white/50">Based on idle reduction</div>
+                            </div>
+                            <div class="text-4xl font-light font-mono text-white" id="ai-fuel-saved">-- <span
+                                    class="text-sm text-[#00FFAB]">LITERS</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <footer
+        class="fixed bottom-0 w-full h-10 flex justify-between items-center px-6 bg-[#0A0B0D] border-t border-white/10 z-50">
+        <div class="flex items-center gap-5">
+            <div class="text-[10px] font-bold tracking-widest text-[#00FFAB] uppercase">● Sensor Stream Ready</div>
+            <div class="flex items-center gap-1.5">
+                <span id="mqtt-status-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#FFD700;box-shadow:0 0 6px #FFD700;transition:background .3s,box-shadow .3s;flex-shrink:0"></span>
+                <span id="mqtt-status-text" class="text-[10px] font-bold tracking-widest uppercase" style="color:#FFD700">MQTT Connecting…</span>
+            </div>
+        </div>
+        <div class="text-[10px] font-mono text-white/60 flex gap-8 uppercase tracking-wider transition-opacity duration-500"
+            id="footer-distances" style="opacity: 0;">
+            <span id="dynamic-total">Total: -- km</span>
+            <span id="dynamic-remaining" class="text-[#00F2FF]">Remaining: -- km</span>
+        </div>
+    </footer>
+
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // --- MAP INITIALIZATION ---
+        const map = L.map('warehouse-map', {
+            zoomControl: false,
+            attributionControl: false,
+            renderer: L.svg({ padding: 1.5 })
+        }).setView([11.0168, 76.9558], 12);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { maxZoom: 19, zIndex: 10 }).addTo(map);
+
+        let waypointMarkers = [];
+        let activeRoutePolylineBg = null;
+        let activeRoutePolyline = null;
+        let gpsMarker = null;
+        let gpsInterval = null;
+
+        const iconGPS = L.divIcon({ className: 'neon-gps-marker', iconSize: [16, 16] });
+
+        // --- STATE BUFFER ---
+        let terminalState = {
+            waypoints: [],
+            metrics: { etaMinutes: 0, totalDistance: 0, remainingDistance: 0 },
+            alerts: [
+                { id: "a1", type: "TEMP WARNING", message: "Asset #0982 Cargo at 8.1°C", desc: "DHT22 sensor reported reading 8.1°C, exceeding max allowable limit of 6°C for Pallet B.", color: "#FF4D4D" },
+                { id: "a2", type: "ROUTE DEVIATION", message: "Traffic anomaly on NH-54", desc: "Edge AI detected heavy slowdowns ahead. A* Engine recommending local bypass.", color: "#F59E0B" }
+            ],
+            assets: [
+                {
+                    fleetId: "#BS-0982", destination: "Awaiting Input...", status: "STANDBY", statusColor: "text-white/50",
+                    eta: "--", num: "01", arduino: { temp: 22.4, humidity: 45.1, speed: 0 },
+                    ml_predictions: { risk_label: "Scanning..." }
+                }
+            ],
+            routing: { fetchedPath: [], currentPathIndex: 0, isOptimized: false }
+        };
+
+        // --- UI TOGGLES & PANELS ---
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-link').forEach(el => el.classList.remove('active'));
+            const link = document.getElementById(`tab-${tabId}-link`);
+            if (link) link.classList.add('active');
+
+            document.querySelectorAll('.view-panel').forEach(el => {
+                el.classList.remove('active-panel');
+                el.classList.add('hidden-panel');
+            });
+            document.getElementById(`view-${tabId}`).classList.remove('hidden-panel');
+            document.getElementById(`view-${tabId}`).classList.add('active-panel');
+
+            closeAllPanels();
+        }
+
+        function closeAllPanels() {
+            document.getElementById('cargo-panel').classList.remove('panel-open');
+            document.getElementById('alerts-panel').classList.remove('panel-open');
+            document.getElementById('hw-panel').classList.remove('panel-open');
+
+            // Restore main overview UI
+            const leftPanel = document.getElementById('overview-left-panel');
+            leftPanel.style.opacity = '1';
+            leftPanel.style.pointerEvents = 'auto';
+        }
+
+        function togglePanel(panelName) {
+            const targetPanel = document.getElementById(`${panelName}-panel`);
+            const isOpening = !targetPanel.classList.contains('panel-open');
+
+            closeAllPanels(); // Close everything first
+
+            if (isOpening) {
+                targetPanel.classList.add('panel-open');
+                // Fade out main overview UI to prevent overlap
+                const leftPanel = document.getElementById('overview-left-panel');
+                leftPanel.style.opacity = '0';
+                leftPanel.style.pointerEvents = 'none';
+            }
+        }
+
+        // --- REVERSE GEOCODING API ---
+        async function getStreetName(lat, lng) {
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`);
+                const data = await res.json();
+                let name = data.address.road || data.address.suburb || data.address.neighbourhood || data.address.village || "Unnamed Location";
+                return `${name}, ${data.address.city || data.address.state_district || ""}`;
+            } catch (e) {
+                return `Lat: ${lat.toFixed(3)}, Lng: ${lng.toFixed(3)}`;
+            }
+        }
+
+        // --- INTERACTIVE MAP LOGIC ---
+        const confirmBtn = document.getElementById('confirm-route-btn');
+        const statusText = document.getElementById('routing-status');
+        const mockCargoItems = ["Pallet A - Pharmaceuticals", "Crate - Li-Ion Batteries", "Pallet B - Frozen Foods", "Container - Server Parts", "Drum - Lab Chemicals", "Pallet C - Microchips"];
+
+        map.on('click', async function (e) {
+            if (!document.getElementById('view-overview').classList.contains('active-panel')) return;
+            if (terminalState.routing.isOptimized || terminalState.waypoints.length >= 10) return;
+
+            const currentClickIndex = terminalState.waypoints.length;
+
+            let iconHtml = `<div class="waypoint-dot" style="width:12px; height:12px;"></div>`;
+            let marker = L.marker(e.latlng, { icon: L.divIcon({ html: iconHtml, className: '' }) }).addTo(map);
+            waypointMarkers.push(marker);
+
+            const randomItem = mockCargoItems[Math.floor(Math.random() * mockCargoItems.length)];
+            const randomWeight = Math.floor(Math.random() * 800 + 100);
+            const randomTemp = (Math.random() * 20 + 2).toFixed(1);
+            const randomHum = Math.floor(Math.random() * 30 + 35);
+
+            const newWaypoint = {
+                lat: e.latlng.lat,
+                lng: e.latlng.lng,
+                id: `wp-${Date.now()}`,
+                name: "Resolving satellite data...",
+                originalIndex: currentClickIndex,
+                optimizedIndex: currentClickIndex,
+                cargo: { item: randomItem, weight: randomWeight, temp: randomTemp, humidity: randomHum }
+            };
+            terminalState.waypoints.push(newWaypoint);
+
+            document.getElementById('manifest-panel').style.opacity = '1';
+            updateManifestUI();
+
+            statusText.innerText = `Unsorted Stops (${terminalState.waypoints.length}/10).`;
+            statusText.style.color = "#00FFAB";
+            if (terminalState.waypoints.length > 1) confirmBtn.disabled = false;
+
+            const streetName = await getStreetName(e.latlng.lat, e.latlng.lng);
+            const wpToUpdate = terminalState.waypoints.find(w => w.id === newWaypoint.id);
+            if (wpToUpdate) {
+                wpToUpdate.name = streetName;
+                updateManifestUI();
+            }
+        });
+
+        document.getElementById('reset-route-btn').addEventListener('click', resetRouting);
+
+        function resetRouting() {
+            waypointMarkers.forEach(m => map.removeLayer(m));
+            if (activeRoutePolyline) map.removeLayer(activeRoutePolyline);
+            if (activeRoutePolylineBg) map.removeLayer(activeRoutePolylineBg);
+            if (gpsMarker) map.removeLayer(gpsMarker);
+            clearInterval(gpsInterval);
+
+            waypointMarkers = []; activeRoutePolyline = null; activeRoutePolylineBg = null; gpsMarker = null;
+            terminalState.waypoints = [];
+            terminalState.routing = { fetchedPath: [], currentPathIndex: 0, isOptimized: false };
+
+            confirmBtn.disabled = true;
+            statusText.innerText = "Awaiting Waypoints (0/10)";
+            statusText.style.color = "rgba(255,255,255,0.6)";
+            document.getElementById('manifest-panel').style.opacity = '0';
+            document.getElementById('eta-panel').style.opacity = '0';
+            document.getElementById('footer-distances').style.opacity = '0';
+
+            terminalState.assets[0].destination = "Awaiting Input...";
+            terminalState.assets[0].status = "STANDBY";
+            terminalState.assets[0].statusColor = "text-white/50";
+            terminalState.assets[0].eta = "--";
+            terminalState.assets[0].arduino.speed = 0;
+
+            document.getElementById('ai-bar-1').style.width = '0%';
+            document.getElementById('ai-bar-2').style.width = '0%';
+            document.getElementById('ai-bar-3').style.width = '0%';
+
+            updateTerminalUI();
+        }
+
+        window.removeWaypoint = function (id) {
+            if (terminalState.routing.isOptimized) return;
+
+            const index = terminalState.waypoints.findIndex(w => w.id === id);
+            if (index === -1) return;
+
+            terminalState.waypoints.splice(index, 1);
+
+            waypointMarkers.forEach(m => map.removeLayer(m));
+            waypointMarkers = [];
+
+            terminalState.waypoints.forEach((wp, idx) => {
+                wp.originalIndex = idx;
+                wp.optimizedIndex = idx;
+                let iconHtml = `<div class="waypoint-dot" style="width:12px; height:12px;"></div>`;
+                let marker = L.marker([wp.lat, wp.lng], { icon: L.divIcon({ html: iconHtml, className: '' }) }).addTo(map);
+                waypointMarkers.push(marker);
+            });
+
+            updateManifestUI();
+
+            statusText.innerText = `Unsorted Stops (${terminalState.waypoints.length}/10).`;
+            if (terminalState.waypoints.length <= 1) confirmBtn.disabled = true;
+            if (terminalState.waypoints.length === 0) {
+                statusText.innerText = "Awaiting Waypoints (0/10)";
+                statusText.style.color = "rgba(255,255,255,0.6)";
+                document.getElementById('manifest-panel').style.opacity = '0';
+            }
+        };
+
+        // --- ROUTE FETCHING ---
+        confirmBtn.addEventListener('click', async () => {
+            confirmBtn.disabled = true;
+            terminalState.routing.isOptimized = true;
+            statusText.innerText = "Solving TSP Matrix...";
+            statusText.style.color = "#00F2FF";
+
+            const coordsString = terminalState.waypoints.map(wp => `${wp.lng},${wp.lat}`).join(';');
+            const url = `https://router.project-osrm.org/trip/v1/driving/${coordsString}?source=first&destination=any&roundtrip=false&overview=full&geometries=geojson&steps=true`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data.code !== 'Ok') throw new Error("OSRM API Rejected");
+
+                const coordinates = data.trips[0].geometry.coordinates;
+                const latLngCoords = coordinates.map(coord => [coord[1], coord[0]]);
+                terminalState.routing.fetchedPath = latLngCoords;
+
+                waypointMarkers.forEach(m => map.removeLayer(m));
+                waypointMarkers = [];
+
+                data.waypoints.forEach((wp, originalIdx) => {
+                    terminalState.waypoints[originalIdx].optimizedIndex = wp.waypoint_index;
+                });
+
+                terminalState.waypoints.sort((a, b) => a.optimizedIndex - b.optimizedIndex);
+
+                terminalState.waypoints.forEach((wp, i) => {
+                    const markerNum = i === 0 ? "S" : i;
+                    let iconHtml = `<div class="waypoint-number ${i === 0 ? '!bg-[#FF4D4D] !shadow-[0_0_15px_rgba(255,77,77,0.6)]' : ''}" style="width:20px; height:20px; font-size:10px;">${markerNum}</div>`;
+                    let marker = L.marker([wp.lat, wp.lng], { icon: L.divIcon({ html: iconHtml, className: '' }) }).addTo(map);
+                    waypointMarkers.push(marker);
+                });
+
+                activeRoutePolylineBg = L.polyline(latLngCoords, {
+                    color: '#00F2FF', weight: 6, opacity: 0.15, lineJoin: 'round', smoothFactor: 1
+                }).addTo(map);
+
+                activeRoutePolyline = L.polyline(latLngCoords, {
+                    color: '#00FFAB', weight: 3, opacity: 1, lineJoin: 'round', className: 'route-flow'
+                }).addTo(map);
+
+                map.fitBounds(activeRoutePolylineBg.getBounds(), { padding: [50, 50] });
+
+                const distanceKm = (data.trips[0].distance / 1000).toFixed(1);
+                const durationMin = Math.round(data.trips[0].duration / 60);
+
+                terminalState.metrics = { etaMinutes: durationMin, totalDistance: distanceKm, remainingDistance: distanceKm };
+                terminalState.assets[0].destination = `Dynamic Route (${terminalState.waypoints.length} stops)`;
+                terminalState.assets[0].status = "IN TRANSIT";
+                terminalState.assets[0].statusColor = "text-[#00FFAB]";
+                terminalState.assets[0].eta = `${durationMin} mins`;
+
+                let risk = distanceKm > 25 ? "Medium" : "Low";
+                terminalState.assets[0].ml_predictions.risk_label = risk;
+
+                document.getElementById('ai-stat-1').innerText = risk === "Medium" ? "68%" : "24%";
+                document.getElementById('ai-bar-1').style.width = risk === "Medium" ? "68%" : "24%";
+                document.getElementById('ai-stat-2').innerText = "12%";
+                document.getElementById('ai-bar-2').style.width = "12%";
+                document.getElementById('ai-stat-3').innerText = risk === "Medium" ? "84%" : "42%";
+                document.getElementById('ai-bar-3').style.width = risk === "Medium" ? "84%" : "42%";
+
+                statusText.innerText = "Optimization Complete.";
+                document.getElementById('eta-badge-text').innerText = "OPTIMIZED";
+                document.getElementById('eta-panel').style.opacity = '1';
+                document.getElementById('footer-distances').style.opacity = '1';
+
+                document.getElementById('ai-time-saved').innerHTML = `${Math.round(durationMin * 0.22)} <span class="text-sm text-[#00F2FF]">MIN</span>`;
+                document.getElementById('ai-fuel-saved').innerHTML = `${(distanceKm * 0.05).toFixed(1)} <span class="text-sm text-[#00FFAB]">LITERS</span>`;
+
+                updateTerminalUI();
+
+                gpsMarker = L.marker(latLngCoords[0], { icon: iconGPS }).addTo(map);
+                startGPSSimulation();
+
+            } catch (error) {
+                statusText.innerText = "API Rate Limit Hit. Try Again."; statusText.style.color = "#FF4D4D";
+                confirmBtn.disabled = false; terminalState.routing.isOptimized = false;
+            }
+        });
+
+        // --- GPS SIMULATION ---
+        function startGPSSimulation() {
+            gpsInterval = setInterval(() => {
+                const route = terminalState.routing;
+                if (route.fetchedPath.length > 0 && gpsMarker) {
+                    route.currentPathIndex += 2;
+
+                    if (route.currentPathIndex >= route.fetchedPath.length - 1) {
+                        route.currentPathIndex = route.fetchedPath.length - 1;
+                        gpsMarker.setLatLng(route.fetchedPath[route.currentPathIndex]);
+                        clearInterval(gpsInterval);
+
+                        terminalState.metrics.remainingDistance = "0.0";
+                        statusText.innerText = "All Stops Complete.";
+                        terminalState.assets[0].status = "DELIVERED";
+                        terminalState.assets[0].arduino.speed = 0;
+                        updateTerminalUI();
+                    } else {
+                        gpsMarker.setLatLng(route.fetchedPath[route.currentPathIndex]);
+                        let pctComplete = route.currentPathIndex / route.fetchedPath.length;
+                        terminalState.metrics.remainingDistance = (terminalState.metrics.totalDistance * (1 - pctComplete)).toFixed(1);
+                        terminalState.assets[0].arduino.speed = 40 + Math.random() * 10;
+                        updateTerminalUI();
+                    }
+                }
+            }, 100);
+        }
+
+        // --- RENDER SIDE PANELS ---
+        function updateCargoUI() {
+            const list = document.getElementById('cargo-list');
+            if (terminalState.waypoints.length === 0) {
+                list.innerHTML = '<div class="text-xs text-white/40 text-center mt-10">No active waypoints.<br>Drop pins on the map to load cargo.</div>';
+                return;
+            }
+
+            list.innerHTML = '';
+            terminalState.waypoints.forEach((wp, index) => {
+                let numLabel = terminalState.routing.isOptimized ? (index === 0 ? "S" : index) : "—";
+                let borderColor = index === 0 && terminalState.routing.isOptimized ? "border-[#FF4D4D]/30" : "border-[#00F2FF]/30";
+                let textColor = index === 0 && terminalState.routing.isOptimized ? "text-[#FF4D4D]" : "text-[#00F2FF]";
+                let bgColor = index === 0 && terminalState.routing.isOptimized ? "bg-[#FF4D4D]/10" : "bg-[#00F2FF]/10";
+
+                list.insertAdjacentHTML('beforeend', `
+                <div class="bg-[#0F1115] border border-white/5 rounded p-4 relative overflow-hidden hover:border-white/20 transition-colors">
+                    <div class="absolute top-0 right-0 ${bgColor} ${textColor} text-[9px] font-bold px-2 py-1 rounded-bl border-b border-l ${borderColor}">STOP ${numLabel}</div>
+                    <div class="text-[10px] text-white/50 mb-2 truncate pr-14" title="${wp.name}">${wp.name}</div>
+                    <div class="text-sm font-bold text-white mb-3">${wp.cargo.item} <span class="text-white/40 font-normal text-xs ml-1">| ${wp.cargo.weight} kg</span></div>
+                    <div class="flex gap-4 text-[10px] font-mono bg-white/5 p-2 rounded">
+                        <div class="flex items-center gap-1 text-white/80"><span class="material-symbols-outlined text-[14px] text-[#FF4D4D]">device_thermostat</span> ${wp.cargo.temp}°C Target</div>
+                        <div class="flex items-center gap-1 text-white/80"><span class="material-symbols-outlined text-[14px] text-[#00F2FF]">water_drop</span> ${wp.cargo.humidity}% Max</div>
+                    </div>
+                </div>
+            `);
+            });
+        }
+
+        function updateAlertsUI() {
+            const miniList = document.getElementById('dynamic-alerts-list');
+            const detailedList = document.getElementById('detailed-alerts-list');
+
+            document.getElementById('alert-count').innerText = `${terminalState.alerts.length} ACTIVE`;
+            miniList.innerHTML = '';
+            detailedList.innerHTML = '';
+
+            if (terminalState.alerts.length === 0) {
+                miniList.innerHTML = '<div class="text-xs text-white/40 text-center py-2">System nominal.</div>';
+                detailedList.innerHTML = '<div class="text-xs text-white/40 text-center mt-10">No active alerts.<br>System operating nominally.</div>';
+                return;
+            }
+
+            terminalState.alerts.forEach(alert => {
+                // Populate Mini List (Overview Tab)
+                miniList.insertAdjacentHTML('beforeend', `
+                <li class="flex gap-4 items-start pb-4 border-b border-white/5 cursor-pointer hover:opacity-75 transition-opacity" onclick="togglePanel('alerts')">
+                    <div class="mt-1 w-2 h-2 rounded-full bg-[${alert.color}] shadow-[0_0_10px_${alert.color}] animate-pulse"></div>
+                    <div>
+                        <div class="text-xs font-bold text-white mb-1" style="color: ${alert.color}">${alert.type}</div>
+                        <div class="text-[10px] text-white/60">${alert.message}</div>
+                    </div>
+                </li>
+            `);
+
+                // Populate Detailed List (Slide-out Panel)
+                detailedList.insertAdjacentHTML('beforeend', `
+                <div class="bg-[#0F1115] border border-white/10 rounded p-4 relative overflow-hidden">
+                    <div class="flex gap-3 items-start mb-3">
+                        <div class="mt-1 w-2 h-2 flex-shrink-0 rounded-full bg-[${alert.color}] shadow-[0_0_10px_${alert.color}] animate-pulse"></div>
+                        <div>
+                            <div class="text-sm font-bold text-white mb-1" style="color: ${alert.color}">${alert.type}</div>
+                            <div class="text-xs text-white/80 mb-2">${alert.message}</div>
+                            <div class="text-[10px] text-white/50 bg-white/5 p-2 rounded leading-relaxed">${alert.desc}</div>
+                        </div>
+                    </div>
+                    <div class="flex gap-2 mt-4 pt-4 border-t border-white/5">
+                        <button onclick="acknowledgeAlert('${alert.id}')" class="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-bold py-2 rounded transition-colors uppercase tracking-wider">Acknowledge</button>
+                        <button class="flex-1 bg-[${alert.color}]/10 hover:bg-[${alert.color}]/20 border border-[${alert.color}]/30 text-[${alert.color}] text-[10px] font-bold py-2 rounded transition-colors uppercase tracking-wider">Override AI</button>
+                    </div>
+                </div>
+            `);
+            });
+        }
+
+        // --- RENDER MANIFEST ---
+        function updateManifestUI() {
+            const manifestList = document.getElementById('manifest-list');
+            document.getElementById('manifest-count').innerText = `${terminalState.waypoints.length} STOPS`;
+
+            manifestList.innerHTML = '';
+            terminalState.waypoints.forEach((wp, index) => {
+                let numLabel = terminalState.routing.isOptimized ? (index === 0 ? "S" : index) : "—";
+                let color = index === 0 && terminalState.routing.isOptimized ? "border-[#FF4D4D] text-[#FF4D4D] bg-[#FF4D4D]/10" : "border-[#00F2FF] text-[#00F2FF] bg-[#00F2FF]/10";
+
+                const deleteBtn = !terminalState.routing.isOptimized
+                    ? `<button onclick="event.stopPropagation(); removeWaypoint('${wp.id}')" class="text-white/30 hover:text-[#FF4D4D] opacity-0 group-hover:opacity-100 transition-opacity text-xs px-2 flex-shrink-0">✕</button>`
+                    : '';
+
+                manifestList.insertAdjacentHTML('beforeend', `
+                <div class="manifest-item flex items-center justify-between p-2 bg-white/5 border border-white/5 rounded hover:bg-white/10 group cursor-pointer" onclick="togglePanel('cargo')">
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <div class="flex-shrink-0 w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold border ${color}">
+                            ${numLabel}
+                        </div>
+                        <div class="text-xs text-white/80 truncate" title="${wp.name}">${wp.name}</div>
+                    </div>
+                    ${deleteBtn}
+                </div>
+            `);
+            });
+
+            updateCargoUI();
+        }
+
+        // --- RENDER GLOBAL UI ---
+        function updateTerminalUI() {
+            const state = terminalState;
+            const asset = state.assets[0];
+
+            document.getElementById('dynamic-eta').innerText = state.metrics.etaMinutes;
+            document.getElementById('dynamic-total').innerText = `Total: ${state.metrics.totalDistance} km`;
+            document.getElementById('dynamic-remaining').innerText = `Remaining: ${state.metrics.remainingDistance} km`;
+
+            updateAlertsUI();
+
+            document.getElementById('dynamic-fleet-list').innerHTML = `
+            <div class="flex justify-between items-center p-3 bg-white/5 rounded border border-white/10">
+                <div class="flex gap-3 items-center">
+                    <div class="w-8 h-8 rounded bg-[#00F2FF]/10 border border-[#00F2FF]/30 flex items-center justify-center text-[10px] font-bold text-[#00F2FF]">${asset.num}</div>
+                    <div>
+                        <div class="text-xs font-bold text-white">${asset.fleetId}</div>
+                        <div class="text-[10px] text-white/50 mb-1 truncate w-32">${asset.destination}</div>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="text-xs ${asset.statusColor} font-bold tracking-widest">${asset.status}</div>
+                    <div class="text-[10px] text-white/50">${asset.eta}</div>
+                </div>
+            </div>`;
+
+            document.getElementById('full-fleet-table').innerHTML = `
+            <tr class="hover:bg-white/5 transition-colors">
+                <td class="px-6 py-4 font-bold text-[#00F2FF]">${asset.fleetId}</td>
+                <td class="px-6 py-4"><span class="${asset.statusColor} text-xs font-bold bg-white/5 px-2 py-1 rounded">${asset.status}</span></td>
+                <td class="px-6 py-4 font-mono text-xs text-white/70">
+                    T: ${asset.arduino.temp}°C | H: ${asset.arduino.humidity}% | ${Math.round(asset.arduino.speed)} km/h
+                </td>
+                <td class="px-6 py-4 text-xs uppercase tracking-wider text-white/50">${asset.ml_predictions.risk_label}</td>
+                <td class="px-6 py-4 text-white">${asset.eta}</td>
+                <td class="px-6 py-4 text-right">
+                    <button class="text-[#00F2FF] hover:text-white transition-colors text-xs uppercase tracking-wider">Ping Unit</button>
+                </td>
+            </tr>`;
+
+            updateManifestUI();
+        }
+
+        function acknowledgeAlert(alertId) {
+            // [BRIDGE FIX] Filter the alert out of state, then immediately re-render
+            // so the DOM is updated in the same tick — prevents stale alert cards.
+            terminalState.alerts = terminalState.alerts.filter(a => a.id !== alertId);
+            updateAlertsUI();
+            updateTerminalUI();
+        }
+
+        setInterval(() => { document.getElementById('clock-display').innerText = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }) + " IST"; }, 1000);
+
+        updateTerminalUI();
+
+        // ═══════════════════════════════════════════════════════════════
+        // BASK BRIDGE: FAIL-SAFE INTELLIGENCE BLOCK
+        // Reads the Golden Route corridor from localStorage (set by the
+        // Driver Terminal) and connects to the LoRa WebSocket bridge.
+        // Runs a 50-metre deviation check on every GPS update.
+        // ═══════════════════════════════════════════════════════════════
+        (function initBridgeFailSafe() {
+
+            // --- Step 1: Load Golden Route corridor from localStorage ---
+            const DEVIATION_ALERT_ID = 'bridge-deviation-001';
+            let deviationAlertActive = false;
+
+            try {
+                const raw = localStorage.getItem('baskGoldenRoute');
+                if (raw) {
+                    const goldenRoute = JSON.parse(raw);
+                    // allowedCorridor is an array of route arrays (extensible)
+                    if (goldenRoute.allowedCorridor && goldenRoute.allowedCorridor.length > 0) {
+                        terminalState.allowedRoutes = goldenRoute.allowedCorridor;
+                        console.log(`[Bridge] Loaded Golden Route corridor with ${terminalState.allowedRoutes.length} path(s) from localStorage.`);
+                        console.log(`[Bridge] Timestamp: ${goldenRoute.timestamp}`);
+                    }
+                } else {
+                    console.warn('[Bridge] No baskGoldenRoute found in localStorage. Deviation checks will be skipped.');
+                }
+            } catch (e) {
+                console.error('[Bridge] Failed to parse baskGoldenRoute from localStorage:', e);
+            }
+
+            // Ensure allowedRoutes always exists on state
+            if (!terminalState.allowedRoutes) {
+                terminalState.allowedRoutes = [];
+            }
+
+            // --- Step 2: Deviation Check using Leaflet's distanceTo() ---
+            // Returns true if (lat, lng) is within 50 metres of ANY point
+            // across ANY route in terminalState.allowedRoutes.
+            function checkDeviation(lat, lng) {
+                if (terminalState.allowedRoutes.length === 0) return; // No corridor loaded
+
+                const vehicleLatLng = L.latLng(lat, lng);
+                const THRESHOLD_METRES = 50;
+                let withinCorridor = false;
+
+                outerLoop:
+                for (const route of terminalState.allowedRoutes) {
+                    for (const point of route) {
+                        // Each point is [lat, lng]
+                        const corridorPoint = L.latLng(point[0], point[1]);
+                        if (vehicleLatLng.distanceTo(corridorPoint) <= THRESHOLD_METRES) {
+                            withinCorridor = true;
+                            break outerLoop;
+                        }
+                    }
+                }
+
+                if (!withinCorridor) {
+                    // Vehicle is OFF the corridor
+                    if (!deviationAlertActive) {
+                        deviationAlertActive = true;
+                        const now = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+                        const newAlert = {
+                            id: DEVIATION_ALERT_ID,
+                            type: 'DEVIATION ALERT',
+                            message: `Vehicle left approved corridor at ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+                            desc: `LoRa GPS reported the vehicle is more than 50 metres from the Golden Route corridor. Possible route deviation or GPS anomaly. Last fix: ${now} IST.`,
+                            color: '#FF4D4D'
+                        };
+                        // Prevent duplicate by checking id first
+                        const alreadyExists = terminalState.alerts.some(a => a.id === DEVIATION_ALERT_ID);
+                        if (!alreadyExists) {
+                            terminalState.alerts.unshift(newAlert);
+                            updateAlertsUI();
+                            console.warn('[Bridge] DEVIATION DETECTED at', lat, lng);
+                        }
+                    }
+                } else {
+                    // Vehicle back on corridor — clear any existing deviation alert
+                    if (deviationAlertActive) {
+                        deviationAlertActive = false;
+                        terminalState.alerts = terminalState.alerts.filter(a => a.id !== DEVIATION_ALERT_ID);
+                        updateAlertsUI();
+                        console.log('[Bridge] Vehicle returned to corridor. Deviation alert cleared.');
+                    }
+                }
+            }
+
+            // --- Step 3: WebSocket connection to LoRa Bridge ---
+            const WS_URL = 'ws://localhost:8765';
+            let wsReconnectTimer = null;
+
+            function connectBridge() {
+                console.log(`[Bridge] Connecting to ${WS_URL}...`);
+                const ws = new WebSocket(WS_URL);
+
+                ws.onopen = () => {
+                    console.log('[Bridge] WebSocket CONNECTED to LoRa bridge.');
+                    clearTimeout(wsReconnectTimer);
+                };
+
+                ws.onmessage = (event) => {
+                    const raw = event.data.trim();
+
+                    // Handle hardware error signals from bridge
+                    if (raw.startsWith('ERROR:')) {
+                        console.error('[Bridge] Hardware error received:', raw);
+                        return;
+                    }
+
+                    // Parse "lat,lng" format
+                    const parts = raw.split(',');
+                    if (parts.length < 2) return;
+
+                    const lat = parseFloat(parts[0]);
+                    const lng = parseFloat(parts[1]);
+                    if (isNaN(lat) || isNaN(lng)) return;
+
+                    // --- Update the vehicle GPS marker on the map ---
+                    if (!gpsMarker) {
+                        // Create GPS marker if it doesn't exist yet
+                        gpsMarker = L.marker([lat, lng], { icon: iconGPS }).addTo(map);
+                        console.log('[Bridge] GPS marker placed at', lat, lng);
+                    } else {
+                        gpsMarker.setLatLng([lat, lng]);
+                    }
+                    document.getElementById('s-gps').textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
+
+                    // --- Run deviation check ---
+                    checkDeviation(lat, lng);
+                };
+
+                ws.onerror = (err) => {
+                    console.warn('[Bridge] WebSocket error (bridge offline?):', err);
+                };
+
+                ws.onclose = () => {
+                    console.warn('[Bridge] WebSocket closed. Retrying in 5s...');
+                    wsReconnectTimer = setTimeout(connectBridge, 5000);
+                };
+            }
+
+            // Boot the LoRa WebSocket bridge (local fallback)
+            connectBridge();
+
+            // ── MQTT Cloud Subscription — receives from Driver Terminal on any device ──
+            const MQTT_BROKER  = 'wss://broker.hivemq.com:8884/mqtt';
+            const MQTT_SESSION = 'bask-demo-02'; // must match index.html
+            const MQTT_GPS     = `bask-solutions/${MQTT_SESSION}/gps`;
+            const MQTT_ROUTE   = `bask-solutions/${MQTT_SESSION}/route`;
+            const mqttClientId = 'bask-warehouse-' + Math.random().toString(16).slice(2, 10);
+
+            const mqttDot = document.getElementById('mqtt-status-dot');
+            const mqttTxt = document.getElementById('mqtt-status-text');
+
+            const mqttSub = mqtt.connect(MQTT_BROKER, {
+                clientId: mqttClientId,
+                clean: true,
+                reconnectPeriod: 4000,
+                connectTimeout: 15000,
+            });
+
+            mqttSub.on('connect', () => {
+                console.log('[MQTT] Warehouse connected to HiveMQ.');
+                mqttSub.subscribe([MQTT_GPS, MQTT_ROUTE], { qos: 1 }, (err) => {
+                    if (!err) console.log(`[MQTT] Subscribed to ${MQTT_GPS} + ${MQTT_ROUTE}`);
+                });
+                if (mqttDot) { mqttDot.style.background = '#00FFAB'; mqttDot.style.boxShadow = '0 0 8px #00FFAB'; }
+                if (mqttTxt) mqttTxt.textContent = 'MQTT Connected';
+            });
+
+            mqttSub.on('reconnect', () => {
+                if (mqttDot) { mqttDot.style.background = '#FFD700'; mqttDot.style.boxShadow = '0 0 8px #FFD700'; }
+                if (mqttTxt) mqttTxt.textContent = 'MQTT Reconnecting…';
+            });
+
+            mqttSub.on('message', (topic, payload) => {
+                let data;
+                try { data = JSON.parse(payload.toString()); } catch { return; }
+
+                if (topic === MQTT_GPS) {
+                    const { lat, lng } = data;
+                    if (typeof lat !== 'number' || typeof lng !== 'number') return;
+                    if (!gpsMarker) {
+                        gpsMarker = L.marker([lat, lng], { icon: iconGPS }).addTo(map);
+                    } else {
+                        gpsMarker.setLatLng([lat, lng]);
+                    }
+                    document.getElementById('s-gps').textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
+                    checkDeviation(lat, lng);
+                }
+
+                if (topic === MQTT_ROUTE) {
+                    if (data.allowedCorridor && data.allowedCorridor.length > 0) {
+                        terminalState.allowedRoutes = data.allowedCorridor;
+                        console.log(`[MQTT] Route corridor loaded — ${data.allowedCorridor[0].length} points. Timestamp: ${data.timestamp}`);
+
+                        if (window.managerRouteLayer) {
+                            window.managerRouteLayer.clearLayers();
+                        } else {
+                            window.managerRouteLayer = L.layerGroup().addTo(map);
+                        }
+                        
+                        const geomPts = data.allowedCorridor[0];
+                        const palette = ['#00FFAB', '#FFD700', '#FF8E53', '#C084FC'];
+                        
+                        if (data.waypoints && data.waypoints.length >= 2) {
+                            // Needs haversine
+                            function haversineDist(lat1, lng1, lat2, lng2) {
+                                const R = 6371;
+                                const dLat = (lat2 - lat1) * Math.PI / 180;
+                                const dLng = (lng2 - lng1) * Math.PI / 180;
+                                const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+                                return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                            }
+                            
+                            let wpIndices = [0];
+                            for (let i = 1; i < data.waypoints.length - 1; i++) {
+                                let bestDist = Infinity;
+                                let bestIdx = wpIndices[i-1];
+                                for (let j = wpIndices[i-1]; j < geomPts.length; j++) {
+                                    const d = haversineDist(data.waypoints[i].lat, data.waypoints[i].lng, geomPts[j][0], geomPts[j][1]);
+                                    if (d < bestDist) {
+                                        bestDist = d;
+                                        bestIdx = j;
+                                    }
+                                }
+                                wpIndices.push(bestIdx);
+                            }
+                            wpIndices.push(geomPts.length - 1);
+                            
+                            let startIndex = 0;
+                            for (let i = 1; i < data.waypoints.length; i++) {
+                                const color = palette[i % palette.length];
+                                const endIndex = wpIndices[i];
+                                const segPts = geomPts.slice(startIndex, endIndex + 1);
+                                
+                                if (segPts.length >= 2) {
+                                    L.polyline(segPts, { color: color, weight: 6, opacity: 0.9, className: 'route-flow' }).addTo(window.managerRouteLayer);
+                                }
+                                startIndex = endIndex;
+                            }
+                            
+                            // Re-plot waypoint markers
+                            waypointMarkers.forEach(m => map.removeLayer(m));
+                            waypointMarkers = [];
+                            data.waypoints.forEach((wp, i) => {
+                                const markerNum = i === 0 ? "W" : i;
+                                const color = i === 0 ? '#00F2FF' : palette[i % palette.length];
+                                let iconHtml = `<div class="waypoint-number" style="width:20px; height:20px; font-size:10px; background-color:${color}; box-shadow:0 0 15px ${color}; border:2px solid #000; color:#000;">${markerNum}</div>`;
+                                let marker = L.marker([wp.lat, wp.lng], { icon: L.divIcon({ html: iconHtml, className: '' }) }).addTo(map);
+                                waypointMarkers.push(marker);
+                            });
+                        } else {
+                            // Fallback if no waypoints
+                            L.polyline(geomPts, { color: '#FFD700', weight: 5, opacity: 0.9, className: 'route-flow' }).addTo(window.managerRouteLayer);
+                        }
+
+                        // Fit bounds
+                        let bounds;
+                        if (geomPts.length > 0 && typeof geomPts[0] === 'object' && 'lat' in geomPts[0]) {
+                            bounds = L.polyline(geomPts).getBounds();
+                        } else if (geomPts.length > 0 && Array.isArray(geomPts[0])) {
+                            bounds = L.polyline(geomPts).getBounds();
+                        }
+                        if (bounds && bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50] });
+                    }
+                }
+            });
+
+            mqttSub.on('error', err => console.error('[MQTT] Warehouse error:', err.message));
+
+        })(); // End IIFE — Fail-Safe Intelligence Block
+
+        // --- SENSOR POLLING FOR HARDWARE LOGS ---
+        let temp = 28.4, hum = 64;
+        async function pollSensors() {
+            try {
+                const resp = await fetch('http://localhost:8000/api/sensor', { signal: AbortSignal.timeout(3000) });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const d = await resp.json();
+                if (!d.error) {
+                    temp = d.temp_c ?? temp;
+                    hum = d.humidity ?? hum;
+                    document.getElementById('s-temp').textContent = temp.toFixed(1) + '°C';
+                    document.getElementById('s-hum').textContent = Math.round(hum) + '%';
+                    if (d.lat) document.getElementById('s-gps').textContent = d.lat.toFixed(5) + ', ' + d.lng.toFixed(5);
+                }
+            } catch (err) {
+                // Ignore silent fails
+            }
+        }
+        setInterval(pollSensors, 2000);
+        pollSensors();
+    </script>
+</body>
+
+</html>
